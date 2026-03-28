@@ -1,0 +1,22 @@
+# --- Core Retrieval Dependencies ---
+sentence-transformers==2.2.2
+transformers==4.36.2
+huggingface-hub==0.23.0
+faiss-cpu==1.7.4
+
+# --- API / Server ---
+fastapi==0.103.2
+uvicorn==0.22.0
+
+# --- Database Access ---
+sqlalchemy==2.0.23
+
+# --- Extras ---
+pydantic==1.10.7
+python-multipart==0.0.6
+requests==2.31.0
+typing-extensions==4.8.0
+tqdm==4.66.1
+
+# --- Testing ---
+pytest==7.4.2
