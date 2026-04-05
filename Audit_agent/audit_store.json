@@ -1,0 +1,159 @@
+{
+  "total_requests": 8,
+  "completed_requests": 0,
+  "audit_passes": 7,
+  "latency_samples": [
+    19.11,
+    14.22,
+    124.66,
+    139.14,
+    82.95,
+    14.76,
+    153.31,
+    14.86
+  ],
+  "agent_success": {
+    "Intent_Agent": 8,
+    "Table_Agent": 8,
+    "Column_Pruning_Agent": 0,
+    "SQL_Generator": 8,
+    "SQL_Validator": 8,
+    "Audit_Agent": 7
+  },
+  "agent_attempts": {
+    "Intent_Agent": 8,
+    "Table_Agent": 8,
+    "Column_Pruning_Agent": 8,
+    "SQL_Generator": 8,
+    "SQL_Validator": 8,
+    "Audit_Agent": 8
+  },
+  "events": [
+    {
+      "timestamp": "2026-04-05T14:30:41.164673Z",
+      "session_id": null,
+      "duration": 14.86,
+      "agents": {
+        "Intent_Agent": true,
+        "Table_Agent": true,
+        "Column_Pruning_Agent": false,
+        "SQL_Generator": true,
+        "SQL_Validator": true,
+        "Audit_Agent": true
+      },
+      "audit_passed": true
+    },
+    {
+      "timestamp": "2026-04-05T14:30:22.980989Z",
+      "session_id": null,
+      "duration": 153.31,
+      "agents": {
+        "Intent_Agent": true,
+        "Table_Agent": true,
+        "Column_Pruning_Agent": false,
+        "SQL_Generator": true,
+        "SQL_Validator": true,
+        "Audit_Agent": true
+      },
+      "audit_passed": true
+    },
+    {
+      "timestamp": "2026-04-05T14:23:44.550211Z",
+      "session_id": null,
+      "duration": 14.76,
+      "agents": {
+        "Intent_Agent": true,
+        "Table_Agent": true,
+        "Column_Pruning_Agent": false,
+        "SQL_Generator": true,
+        "SQL_Validator": true,
+        "Audit_Agent": true
+      },
+      "audit_passed": true
+    },
+    {
+      "timestamp": "2026-04-05T14:22:33.586277Z",
+      "session_id": null,
+      "duration": 82.95,
+      "agents": {
+        "Intent_Agent": true,
+        "Table_Agent": true,
+        "Column_Pruning_Agent": false,
+        "SQL_Generator": true,
+        "SQL_Validator": true,
+        "Audit_Agent": true
+      },
+      "audit_passed": true
+    },
+    {
+      "timestamp": "2026-04-05T14:22:33.374224Z",
+      "session_id": null,
+      "duration": 139.14,
+      "agents": {
+        "Intent_Agent": true,
+        "Table_Agent": true,
+        "Column_Pruning_Agent": false,
+        "SQL_Generator": true,
+        "SQL_Validator": true,
+        "Audit_Agent": false
+      },
+      "audit_passed": false
+    },
+    {
+      "timestamp": "2026-04-05T14:22:32.896992Z",
+      "session_id": null,
+      "duration": 124.66,
+      "agents": {
+        "Intent_Agent": true,
+        "Table_Agent": true,
+        "Column_Pruning_Agent": false,
+        "SQL_Generator": true,
+        "SQL_Validator": true,
+        "Audit_Agent": true
+      },
+      "audit_passed": true
+    },
+    {
+      "timestamp": "2026-04-05T14:04:06.506754Z",
+      "session_id": null,
+      "duration": 14.22,
+      "agents": {
+        "Intent_Agent": true,
+        "Table_Agent": true,
+        "Column_Pruning_Agent": false,
+        "SQL_Generator": true,
+        "SQL_Validator": true,
+        "Audit_Agent": true
+      },
+      "audit_passed": true
+    },
+    {
+      "timestamp": "2026-04-05T14:01:46.082327Z",
+      "session_id": null,
+      "duration": 19.11,
+      "agents": {
+        "Intent_Agent": true,
+        "Table_Agent": true,
+        "Column_Pruning_Agent": false,
+        "SQL_Generator": true,
+        "SQL_Validator": true,
+        "Audit_Agent": true
+      },
+      "audit_passed": true
+    }
+  ],
+  "feedbacks": [
+    {
+      "timestamp": "2026-04-05T14:04:43.825064Z",
+      "session_id": "3a16c12f-d655-4b8d-96de-024b21abeebf",
+      "email": "gurunathagoudambiradar@gmail.com",
+      "feedback": "i am not happy with these result please mention result as cgpa"
+    },
+    {
+      "timestamp": "2026-04-05T14:02:15.714549Z",
+      "session_id": "c0aa7497-15b8-40e9-9db4-a0380114cc63",
+      "email": "gurunathagoudambiradar@gmail.com",
+      "feedback": "good it was accurate "
+    }
+  ]
+}

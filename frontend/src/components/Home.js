@@ -7,6 +7,8 @@ import { useNavigate } from 'react-router-dom';
 
 function Home() {
   const navigate = useNavigate();
+  const user = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('user') || 'null') : null;
+  const isAdmin = Boolean(user && user.role === 'admin');
 
   return (
     <div className="glass-container" style={{ position: 'relative', overflow: 'hidden' }}>
@@ -56,19 +58,34 @@ function Home() {
         }}>
           Revolutionizing Academic Insights
         </p>
-        <button
-          onClick={() => navigate('/login')}
-          className="glass-button"
-          style={{ 
-            padding: '18px 48px', 
-            fontSize: '1.4rem', 
-            borderRadius: '40px',
-            background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
-            boxShadow: '0 8px 32px rgba(59, 130, 246, 0.4)'
-          }}
-        >
-          EXPLORE NOW
-        </button>
+        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <button
+            onClick={() => navigate('/login')}
+            className="glass-button"
+            style={{ 
+              padding: '18px 48px', 
+              fontSize: '1.4rem', 
+              borderRadius: '40px',
+              background: 'linear-gradient(135deg, var(--accent-primary), var(--accent-secondary))',
+              boxShadow: '0 8px 32px rgba(59, 130, 246, 0.4)'
+            }}
+          >
+            EXPLORE NOW
+          </button>
+          <button
+            onClick={() => navigate(isAdmin ? '/dashboard' : '/login')}
+            className="glass-button"
+            style={{ 
+              padding: '18px 18px', 
+              fontSize: '1rem', 
+              borderRadius: '40px',
+              background: 'rgba(255,255,255,0.12)',
+              border: '1px solid rgba(255,255,255,0.18)'
+            }}
+          >
+            {isAdmin ? 'ADMIN DASHBOARD' : 'ADMIN LOGIN'}
+          </button>
+        </div>
       </div>
     </div>
   );

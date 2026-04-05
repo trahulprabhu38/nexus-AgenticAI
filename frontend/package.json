@@ -2,7 +2,7 @@
   "name": "aiml-portal",
   "version": "0.1.0",
   "private": true,
-  "proxy": "http://127.0.0.1:8012",
+  "proxy": "http://127.0.0.1:8000",
   "dependencies": {
     "@react-three/drei": "^10.7.6",
     "@react-three/fiber": "^9.4.0",

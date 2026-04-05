@@ -1,156 +1,94 @@
-import re
 import os
-from crewai import Agent, Task, Crew, LLM
+import re
+from openai import OpenAI
+from dotenv import load_dotenv
 
-# --------------------------------------------------
-# Config from environment variables (Docker/K8s ready)
-# --------------------------------------------------
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-LLM_MODEL   = os.getenv("LLM_MODEL", "llama3:latest")
-LLM_TEMP    = float(os.getenv("LLM_TEMPERATURE", "0.0"))
-
-# Use CrewAI's native LLM class with ollama/ prefix
-llm = LLM(
-    model=f"ollama/{LLM_MODEL}",
-    base_url=OLLAMA_HOST,
-    temperature=LLM_TEMP
-)
-
-# --------------------------------------------------
-# Guardrails
-# --------------------------------------------------
-ALLOWED_TABLES = [
-    "semesters",
-    "students",
-    "subjects",
-    "result_sessions",
-    "session_subjects",
-    "student_semester_results",
-    "student_subject_results"
-]
-
-FORBIDDEN_KEYWORDS = [
-    "delete", "drop", "update", "insert", "alter",
-    "truncate", "create", "replace"
-]
-
-
-def guardrail_check(sql_query: str) -> str:
-    """Reject forbidden SQL keywords and tables not in the allowed schema."""
-
-    sql_lower = sql_query.lower()
-
-    # 1. Block forbidden DML/DDL (whole-word match to avoid blocking
-    #    column names like "created_at")
-    for keyword in FORBIDDEN_KEYWORDS:
-        if re.search(rf'\b{keyword}\b', sql_lower):
-            raise ValueError(
-                f"Forbidden SQL keyword detected: '{keyword}'. "
-                "Only SELECT queries are allowed."
-            )
-
-    # 2. Block tables not in the schema
-    tables_used = re.findall(r'(?:FROM|JOIN)\s+(?:aiml_academic\.)?(\w+)', sql_query, re.IGNORECASE)
-    for table in tables_used:
-        if table.lower() not in ALLOWED_TABLES:
-            raise ValueError(
-                f"Invalid table referenced: '{table}'. Not in allowed schema."
-            )
-
-    return sql_query
-
+# Load master .env from root
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"))
 
 # --------------------------------------------------
 # Main agent function
 # --------------------------------------------------
 def generate_sql_with_agent(user_query: str) -> str:
+    return _call_llm_for_sql(user_query)
+
+def generate_sql_with_correction(user_query: str, last_sql: str, error_msg: str) -> str:
     """
-    Accepts a natural language query (optionally pre-enriched with
-    intent/entities from the Intent Agent) and returns a safe SQL query.
+    Self-Healing Loop: Takes a failed SQL and its error message to generate a fixed version.
     """
+    repair_prompt = f"""
+### SELF-HEALING MISSION: REPAIR FAILED SQL
+The previous SQL query failed. You must fix it.
 
-    prompt = f"""
-You are an expert SQL generator for a college academic results system.
+User Query: {user_query}
+Failed SQL: {last_sql}
+Error Message: {error_msg}
 
-Database schema (PostgreSQL, schema: aiml_academic):
+STRICT REPAIR RULES:
+1. THE ERROR indicates you used an aggregate (AVG, SUM, etc.) or a wrong table.
+2. YOU MUST REMOVE all AVG(), SUM(), MAX(), and GROUP BY clauses.
+3. Fetch RAW rows only.
+4. Correct any 'missing FROM-clause' or 'UndefinedTable' errors.
 
-aiml_academic.semesters(semester_no, study_year, semester_label)
-  - semester_no: 1 to 8
-  - study_year: 1 to 4
+CORRECT PATTERN:
+SELECT s.student_usn, s.student_name, r.sgpa, r.percentage, r.grand_total 
+FROM aiml_academic.students s 
+JOIN aiml_academic.student_semester_results r ON s.student_usn = r.student_usn 
+WHERE s.student_usn = '[EXACT USN]'
+"""
+    return _call_llm_for_sql(repair_prompt)
 
-aiml_academic.students(student_usn, student_name, admission_year)
-  - student_usn: primary key e.g. '1DS20AI001'
-  - admission_year: the batch/year the student joined
 
-aiml_academic.subjects(subject_code, subject_label)
+def _call_llm_for_sql(prompt_text: str) -> str:
+    api_key = os.getenv("NVIDIA_API_KEY") or os.getenv("OPENAI_API_KEY")
+    is_nv = api_key.startswith("nvapi-") if api_key else False
+    
+    kwargs = {"api_key": api_key, "timeout": 10.0}
+    if is_nv:
+        kwargs["base_url"] = "https://integrate.api.nvidia.com/v1"
+        model = "meta/llama-3.1-8b-instruct"
+    else:
+        model = "gpt-3.5-turbo"
+        
+    client = OpenAI(**kwargs)
 
-aiml_academic.result_sessions(session_id, source_folder_year, semester_no, session_label, study_year, result_scale)
-  - result_scale: 'marks' or 'grades'
+    prompt = prompt_text
+    if "MISSION" not in prompt_text:
+        prompt = f"""
+### MISSION: GENERATE RAW DATA SELECT QUERIES ONLY.
 
-aiml_academic.session_subjects(session_subject_id, session_id, subject_code, subject_order)
+STRICT RULES (FAILURE TO FOLLOW = CRASH):
+1. FORBIDDEN: NEVER use AVG(), SUM(), MAX(), or COUNT().
+2. FORBIDDEN: NEVER use GROUP BY or HAVING.
+3. FORBIDDEN: DO NOT calculate CGPA in SQL. The Python orchestrator handles all math.
+4. SCHEMA LOCKDOWN: ONLY use 'aiml_academic.' tables.
+5. IDENTITY ANCHOR: If 'GROUND TRUTH IDENTITY' is provided, use that EXACT USN.
+6. RESILIENT JOIN: Always JOIN students s ON r.student_usn = s.student_usn. 
+7. TABLE MAPPING: 'sgpa' is in 'student_semester_results'. 'numeric_marks' is in 'student_subject_results'.
+8. Output RAW SQL only. No markdown. No comments.
 
-aiml_academic.student_semester_results(semester_result_id, session_id, student_usn, student_name_snapshot, sgpa, percentage, grand_total)
-  - sgpa: semester grade point average
-  - percentage: overall percentage
-  - grand_total: total marks
+REQUIRED PATTERN:
+SELECT s.student_usn, s.student_name, r.sgpa, r.percentage, r.grand_total 
+FROM aiml_academic.students s 
+JOIN aiml_academic.student_semester_results r ON s.student_usn = r.student_usn 
+WHERE s.student_usn = '[USN]'
 
-aiml_academic.student_subject_results(subject_result_id, semester_result_id, session_subject_id, raw_result, numeric_marks, grade_text, result_kind)
-  - numeric_marks: marks scored in a subject
-  - grade_text: grade if result_scale is grades
-
-Rules:
-- Use ONLY SELECT statements. Never use DELETE, DROP, UPDATE, INSERT, ALTER.
-- Always prefix tables with schema: aiml_academic.<table_name>
-- "Batch year" or "admission year" refers to students.admission_year
-- "Semester" refers to semesters.semester_no
-- "SGPA" refers to student_semester_results.sgpa
-- "Percentage" refers to student_semester_results.percentage
-- "Marks in a subject" refers to student_subject_results.numeric_marks
-- For top N students, use ORDER BY <metric> DESC LIMIT N
-- Output ONLY the raw SQL query. No explanation. No markdown. No code fences.
-
-User query:
-{user_query}
+User query & Context:
+{prompt_text}
 """
 
-    sql_agent = Agent(
-        role="SQL Generator",
-        goal="Convert natural language queries into correct PostgreSQL SELECT statements",
-        backstory="You are a senior database engineer expert in writing clean, safe SQL for academic databases.",
-        llm=llm,
-        verbose=False
+    completion = client.chat.completions.create(
+        model=model,
+        messages=[{"role": "system", "content": prompt}]
     )
-
-    task = Task(
-        description=prompt,
-        expected_output="A single SQL SELECT query with no markdown, no explanation.",
-        agent=sql_agent
-    )
-
-    crew = Crew(
-        agents=[sql_agent],
-        tasks=[task],
-        verbose=False
-    )
-
-    result = crew.kickoff()
-
-    # --- Robust SQL extraction ---
-    sql_query = str(result)
-
-    # Strip markdown code fences if LLM added them
+    
+    sql_query = completion.choices[0].message.content.strip()
     sql_query = sql_query.replace("```sql", "").replace("```", "").strip()
-
-    # Extract the SELECT statement
     match = re.search(r"(SELECT[\s\S]+?)(?:;|\Z)", sql_query, re.IGNORECASE)
     if match:
         sql_query = match.group(1).strip()
-    else:
-        raise ValueError(
-            f"No valid SQL SELECT found in LLM output. Got: {sql_query[:200]}"
-        )
-
-    # Apply guardrails before returning
-    return guardrail_check(sql_query)
+    
+    return sql_query
 
 
