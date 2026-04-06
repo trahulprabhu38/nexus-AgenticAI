@@ -9,7 +9,10 @@ from dotenv import load_dotenv
 load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
 import uuid
+import hashlib
 import httpx
+from pydantic import BaseModel
+from pymongo import MongoClient
 from service_utils import create_service
 
 app, logger = create_service("Nexus Orchestrator", "nexus-orchestrator")
@@ -23,6 +26,27 @@ COLUMN_PRUNING_URL = os.getenv("COLUMN_PRUNING_URL", "http://column-pruning:8003
 SQL_GENERATOR_URL = os.getenv("SQL_GENERATOR_URL", "http://sql-generator:8004")
 SQL_VALIDATOR_URL = os.getenv("SQL_VALIDATOR_URL", "http://sql-validator:8005")
 AUDIT_AGENT_URL = os.getenv("AUDIT_AGENT_URL", "http://audit-agent:8006")
+
+HOST_EMAIL = os.getenv("HOST_EMAIL", "admin@nexus.ai")
+HOST_PASSWORD = os.getenv("HOST_PASSWORD", "Admin@123")
+MONGO_URL = os.getenv("MONGO_URL", "mongodb://nexus:nexus_pass@localhost:27017/nexus_auth?authSource=admin")
+
+# MongoDB setup
+try:
+    mongo_client = MongoClient(MONGO_URL, serverSelectionTimeoutMS=5000)
+    mongo_db = mongo_client.get_database()
+    users_col = mongo_db["users"]
+    chats_col = mongo_db["chat_history"]
+    users_col.create_index("email", unique=True)
+    logger.info("MongoDB connected")
+except Exception as e:
+    logger.warning("MongoDB unavailable: %s", e)
+    mongo_client = None
+    users_col = None
+    chats_col = None
+
+def _hash_pw(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
 
 sessions = {}
 agent = SyntheticAgent()
@@ -64,6 +88,88 @@ async def health():
         "service": "nexus-orchestrator",
         "agents": checks,
     }
+
+
+class RegisterRequest(BaseModel):
+    name: str
+    email: str
+    password: str
+    student_id: str = ""
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
+
+
+@app.get("/auth/host-email")
+async def host_email():
+    return {"host_email": HOST_EMAIL}
+
+
+@app.post("/auth/register")
+async def register_user(req: RegisterRequest):
+    if not users_col:
+        return {"status": "error", "message": "Database unavailable"}
+    # Check if admin email
+    if req.email.lower() == HOST_EMAIL.lower():
+        return {"status": "error", "message": "This email is reserved for the admin account."}
+    try:
+        users_col.insert_one({
+            "name": req.name,
+            "email": req.email.lower(),
+            "password": _hash_pw(req.password),
+            "student_id": req.student_id,
+            "role": "user",
+        })
+        logger.info("User registered: %s", req.email)
+        return {"status": "ok", "message": "Registration successful"}
+    except Exception as e:
+        if "duplicate" in str(e).lower():
+            return {"status": "error", "message": "An account with this email already exists."}
+        return {"status": "error", "message": str(e)}
+
+
+@app.post("/auth/login")
+async def login_user(req: LoginRequest):
+    # Admin check
+    if req.email.lower() == HOST_EMAIL.lower() and req.password == HOST_PASSWORD:
+        return {"status": "ok", "user": {"email": HOST_EMAIL, "name": "Host Admin", "role": "admin"}}
+
+    if not users_col:
+        return {"status": "error", "message": "Database unavailable"}
+
+    user = users_col.find_one({"email": req.email.lower(), "password": _hash_pw(req.password)})
+    if user:
+        return {"status": "ok", "user": {"email": user["email"], "name": user["name"], "role": user.get("role", "user"), "student_id": user.get("student_id", "")}}
+    return {"status": "error", "message": "Invalid credentials"}
+
+
+class SaveChatRequest(BaseModel):
+    session_id: str
+    email: str
+    title: str
+    messages: list
+
+
+@app.post("/chat/history/save")
+async def save_chat_history(req: SaveChatRequest):
+    if not chats_col:
+        return {"status": "error"}
+    from datetime import datetime
+    chats_col.update_one(
+        {"session_id": req.session_id},
+        {"$set": {"email": req.email.lower(), "title": req.title, "messages": req.messages, "updated_at": datetime.utcnow()}},
+        upsert=True,
+    )
+    return {"status": "ok"}
+
+
+@app.get("/chat/history/{email}")
+async def get_chat_history(email: str):
+    if not chats_col:
+        return []
+    chats = list(chats_col.find({"email": email.lower()}, {"_id": 0}).sort("updated_at", -1).limit(50))
+    return chats
 
 
 @app.post("/chat/session")

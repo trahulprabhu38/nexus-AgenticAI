@@ -8,6 +8,7 @@ x-backend-common: &backend-common
     OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
     HOST_EMAIL: ${HOST_EMAIL:-admin@nexus.ai}
+    MONGO_URL: mongodb://nexus:nexus_pass@mongodb:27017/nexus_auth?authSource=admin
     LOG_LEVEL: ${LOG_LEVEL:-INFO}
     PYTHONPATH: /app
   networks:
@@ -46,6 +47,32 @@ services:
       <<: *json-logging
       options:
         tag: "postgres"
+
+  # ════════════════════════════════════════════════════════════════════
+  #  MONGODB (Auth & Chat History)
+  # ════════════════════════════════════════════════════════════════════
+  mongodb:
+    image: mongo:7-jammy
+    container_name: nexus-mongodb
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: nexus
+      MONGO_INITDB_ROOT_PASSWORD: nexus_pass
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongodata:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')", "-u", "nexus", "-p", "nexus_pass", "--authenticationDatabase", "admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - nexus-net
+    logging:
+      <<: *json-logging
+      options:
+        tag: "mongodb"
 
   # ════════════════════════════════════════════════════════════════════
   #  AGENT 1: Intent Agent (port 8001)
@@ -199,6 +226,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      mongodb:
+        condition: service_healthy
       intent-agent:
         condition: service_healthy
       table-agent:
@@ -249,6 +278,7 @@ services:
 
 volumes:
   pgdata:
+  mongodata:
   audit-data:
 
 networks:

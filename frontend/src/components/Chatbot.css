@@ -155,6 +155,55 @@
   color: var(--text-primary);
 }
 
+/* ── Pipeline Trace ─────────────────────────────────────────────── */
+.pipeline-trace {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+  padding: 6px 10px;
+  background: var(--bg-elevated, rgba(15, 20, 35, 0.6));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  max-width: 75%;
+}
+
+.pipeline-step {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 4px;
+  white-space: nowrap;
+}
+
+.pipeline-step.done {
+  color: #34d399;
+  background: rgba(52, 211, 153, 0.1);
+}
+
+.pipeline-step.skipped {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
+.pipeline-step.failed {
+  color: #f87171;
+  background: rgba(248, 113, 113, 0.1);
+}
+
+.pipeline-step.blocked {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.1);
+}
+
+.pipeline-arrow {
+  color: var(--text-muted);
+  margin: 0 2px;
+  font-size: 0.65rem;
+  opacity: 0.5;
+}
+
 /* ── Markdown tables inside messages ─────────────────────────────── */
 .message-content table {
   width: 100%;

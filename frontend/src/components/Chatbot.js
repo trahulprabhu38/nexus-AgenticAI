@@ -1,26 +1,22 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import SpeechRecognition, { useSpeechRecognition } from 'react-speech-recognition';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { getApiBase } from '../config';
-import { isAdminUser } from './RequireAdmin';
+import { isAdminUser, getCurrentUser } from './RequireAdmin';
 import './Chatbot.css';
 
 const API_BASE = getApiBase();
 const PERSONAS = ['default', 'student', 'faculty', 'parent', 'recruiter'];
 
+const DEFAULT_MSG = { text: 'Hello! I am your AIML Nexus assistant. Ask me about results, CGPA, placements, or anything academic.', sender: 'bot' };
+
 function Chatbot() {
-  const [messages, setMessages] = useState(() => {
-    const saved = localStorage.getItem('nexusMessages');
-    return saved ? JSON.parse(saved) : [{ text: 'Hello! I am your AIML Nexus assistant. Ask me about results, timetables, placements, or anything academic.', sender: 'bot' }];
-  });
+  const [messages, setMessages] = useState([DEFAULT_MSG]);
   const [input, setInput] = useState('');
-  const [chatHistory, setChatHistory] = useState(() => {
-    const saved = localStorage.getItem('nexusChatHistory');
-    return saved ? JSON.parse(saved) : [];
-  });
-  const [currentChatId, setCurrentChatId] = useState(() => localStorage.getItem('nexusCurrentChatId') || null);
+  const [chatHistory, setChatHistory] = useState([]);
+  const [currentChatId, setCurrentChatId] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const [isListening, setIsListening] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -30,17 +26,42 @@ function Chatbot() {
   const [persona, setPersona] = useState('default');
   const [showAgents, setShowAgents] = useState(false);
   const isAdmin = isAdminUser();
+  const user = getCurrentUser();
+  const userEmail = user?.email || 'guest@nexus.ai';
   const navigate = useNavigate();
   const messagesEndRef = useRef(null);
 
   const { transcript, listening, resetTranscript, browserSupportsSpeechRecognition } = useSpeechRecognition();
 
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
-  useEffect(() => { localStorage.setItem('nexusMessages', JSON.stringify(messages)); }, [messages]);
-  useEffect(() => { localStorage.setItem('nexusChatHistory', JSON.stringify(chatHistory)); }, [chatHistory]);
-  useEffect(() => { localStorage.setItem('nexusCurrentChatId', currentChatId || ''); }, [currentChatId]);
   useEffect(() => { if (transcript) setInput(transcript); }, [transcript]);
-  useEffect(() => { createSession(); fetchAgents(); }, []);
+
+  // Load chat history from MongoDB on mount
+  const loadHistory = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_BASE}/chat/history/${encodeURIComponent(userEmail)}`);
+      const data = await res.json();
+      if (Array.isArray(data)) {
+        setChatHistory(data.map(c => ({
+          id: c.session_id,
+          title: c.title,
+          messages: c.messages || [],
+          timestamp: c.updated_at || new Date().toISOString(),
+        })));
+      }
+    } catch {}
+  }, [userEmail]);
+
+  useEffect(() => {
+    createSession();
+    fetchAgents();
+    loadHistory();
+  }, [loadHistory]);
+
+  // Redirect if not logged in
+  useEffect(() => {
+    if (!user) navigate('/login');
+  }, [user, navigate]);
 
   const createSession = async () => {
     try {
@@ -65,7 +86,18 @@ function Chatbot() {
         { method: 'POST' }
       );
       return await res.json();
-    } catch (err) { return null; }
+    } catch { return null; }
+  };
+
+  // Save chat to MongoDB
+  const saveToMongo = async (chatId, title, msgs) => {
+    try {
+      await fetch(`${API_BASE}/chat/history/save?session_id=${encodeURIComponent(chatId)}&email=${encodeURIComponent(userEmail)}&title=${encodeURIComponent(title)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(msgs),
+      });
+    } catch {}
   };
 
   const handleVoiceInput = () => {
@@ -83,9 +115,7 @@ function Chatbot() {
   const handleSubmitFeedback = async () => {
     if (!feedback.trim()) { setFeedbackStatus('Enter feedback first.'); return; }
     try {
-      const userObj = JSON.parse(localStorage.getItem('user') || '{}');
-      const email = userObj.email || 'guest@nexus.ai';
-      const res = await fetch(`${API_BASE}/audit/feedback?session_id=${encodeURIComponent(sessionId || 'unknown')}&feedback=${encodeURIComponent(feedback)}&email=${encodeURIComponent(email)}`, { method: 'POST' });
+      const res = await fetch(`${API_BASE}/audit/feedback?session_id=${encodeURIComponent(sessionId || 'unknown')}&feedback=${encodeURIComponent(feedback)}&email=${encodeURIComponent(userEmail)}`, { method: 'POST' });
       const data = await res.json();
       if (data.status === 'ok') { setFeedbackStatus('Thanks for your feedback!'); setFeedback(''); }
       else setFeedbackStatus('Could not submit feedback.');
@@ -101,17 +131,18 @@ function Chatbot() {
     setInput('');
     if (isListening) { SpeechRecognition.stopListening(); setIsListening(false); resetTranscript(); }
 
-    if (!currentChatId) {
-      const chatId = Date.now().toString();
+    let chatId = currentChatId;
+    const chatTitle = currentInput.slice(0, 40) + (currentInput.length > 40 ? '...' : '');
+
+    if (!chatId) {
+      chatId = sessionId || Date.now().toString();
       setCurrentChatId(chatId);
-      setChatHistory(prev => [{ id: chatId, title: currentInput.slice(0, 35) + (currentInput.length > 35 ? '...' : ''), messages: newMessages, timestamp: new Date() }, ...prev]);
+      setChatHistory(prev => [{ id: chatId, title: chatTitle, messages: newMessages, timestamp: new Date().toISOString() }, ...prev]);
     }
 
     setLoading(true);
 
     const isModification = /\b(add|insert|update|save|edit|delete)\b/i.test(currentInput);
-    const userObj = JSON.parse(localStorage.getItem('user') || '{}');
-    const userEmail = userObj.email || 'guest@nexus.ai';
 
     let backendResponse;
     if (isModification) {
@@ -132,27 +163,45 @@ function Chatbot() {
           intent: backendResponse.intent,
           confidence: backendResponse.confidence,
           duration: backendResponse.duration,
+          pipeline: backendResponse.pipeline || [],
         }
       : { text: 'Could not connect to the service. Please try again.', sender: 'bot', agent: 'system' };
 
     const finalMessages = [...newMessages, botMessage];
     setMessages(finalMessages);
 
+    // Update chat history
     setChatHistory(prev => {
-      const updated = prev.map(chat => chat.id === currentChatId ? { ...chat, messages: finalMessages } : chat);
-      if (!updated.find(c => c.id === currentChatId)) {
-        return [{ id: currentChatId, title: currentInput.slice(0, 35), messages: finalMessages, timestamp: new Date() }, ...updated];
+      const exists = prev.find(c => c.id === chatId);
+      if (exists) {
+        return prev.map(c => c.id === chatId ? { ...c, messages: finalMessages, timestamp: new Date().toISOString() } : c);
       }
-      return updated;
+      return [{ id: chatId, title: chatTitle, messages: finalMessages, timestamp: new Date().toISOString() }, ...prev];
     });
+
+    // Save to MongoDB
+    saveToMongo(chatId, chatTitle, finalMessages);
 
     setLoading(false);
   };
 
   const startNewChat = () => {
     setCurrentChatId(null);
-    setMessages([{ text: 'Hello! How can I help you today?', sender: 'bot' }]);
+    setMessages([DEFAULT_MSG]);
     createSession();
+  };
+
+  const loadChat = (chat) => {
+    setCurrentChatId(chat.id);
+    setMessages(chat.messages || [DEFAULT_MSG]);
+  };
+
+  const deleteChat = async (e, chatId) => {
+    e.stopPropagation();
+    setChatHistory(prev => prev.filter(c => c.id !== chatId));
+    if (currentChatId === chatId) {
+      startNewChat();
+    }
   };
 
   const toggleAgent = async (agentName, currentEnabled) => {
@@ -173,17 +222,40 @@ function Chatbot() {
           </div>
         </div>
         <div style={{ flex: 1, overflowY: 'auto' }}>
+          {chatHistory.length === 0 && (
+            <div style={{ padding: '20px 16px', color: 'var(--text-muted)', fontSize: '0.82rem', textAlign: 'center' }}>
+              No conversations yet
+            </div>
+          )}
           {chatHistory.map(chat => (
             <div
               key={chat.id}
               className={`chat-history-item ${currentChatId === chat.id ? 'active' : ''}`}
-              onClick={() => { setCurrentChatId(chat.id); setMessages(chat.messages); }}
+              onClick={() => loadChat(chat)}
             >
-              <div style={{ fontWeight: 500, fontSize: '0.88rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{chat.title}</div>
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>{new Date(chat.timestamp).toLocaleDateString()}</div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div style={{ fontWeight: 500, fontSize: '0.85rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', flex: 1 }}>{chat.title}</div>
+                <button
+                  onClick={(e) => deleteChat(e, chat.id)}
+                  style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '0.75rem', padding: '2px 4px', opacity: 0.6 }}
+                  title="Delete chat"
+                >
+                  &times;
+                </button>
+              </div>
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-muted)', marginTop: '2px' }}>
+                {chat.timestamp ? new Date(chat.timestamp).toLocaleDateString() : ''}
+              </div>
             </div>
           ))}
         </div>
+
+        {/* User info */}
+        {user && (
+          <div style={{ padding: '10px 16px', borderTop: '1px solid var(--border)', fontSize: '0.78rem', color: 'var(--text-muted)' }}>
+            {user.name || user.email}
+          </div>
+        )}
 
         {/* Agent status panel (collapsible) */}
         <div style={{ borderTop: '1px solid var(--border)' }}>
@@ -249,6 +321,16 @@ function Chatbot() {
                   <span className="agent-badge">{msg.agent}</span>
                   {msg.intent && <span>{msg.intent}</span>}
                   {msg.duration && <span>{msg.duration}s</span>}
+                </div>
+              )}
+              {msg.sender === 'bot' && msg.pipeline && msg.pipeline.length > 0 && (
+                <div className="pipeline-trace">
+                  {msg.pipeline.map((step, i) => (
+                    <span key={i} className={`pipeline-step ${step.status}`}>
+                      {step.agent}
+                      {i < msg.pipeline.length - 1 && <span className="pipeline-arrow">&rarr;</span>}
+                    </span>
+                  ))}
                 </div>
               )}
               <div className="message-bubble">

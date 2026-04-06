@@ -31,3 +31,5 @@ pyarrow>=14.0.0
 python-dotenv>=1.0.1
 requests>=2.31.0
 httpx>=0.27.0
+pymongo
+python-multipart

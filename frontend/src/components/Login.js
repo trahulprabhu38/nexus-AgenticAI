@@ -9,11 +9,16 @@ const API_BASE = getApiBase();
 function Login() {
   const [isRegister, setIsRegister] = useState(false);
   const [hostEmail, setHostEmail] = useState('');
-  const [hostPassword] = useState('Admin@123');
+  const [loading, setLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
   const navigate = useNavigate();
   const { register, handleSubmit, formState: { errors } } = useForm();
 
   useEffect(() => {
+    // If already logged in, redirect
+    const user = JSON.parse(localStorage.getItem('user') || 'null');
+    if (user) navigate(user.role === 'admin' ? '/dashboard' : '/chatbot');
+
     const loadHostEmail = async () => {
       try {
         const res = await fetch(`${API_BASE}/auth/host-email`);
@@ -23,29 +28,46 @@ function Login() {
       if (process.env.REACT_APP_HOST_EMAIL) setHostEmail(process.env.REACT_APP_HOST_EMAIL);
     };
     loadHostEmail();
-  }, []);
+  }, [navigate]);
 
-  const onSubmit = (data) => {
-    if (typeof window === 'undefined') return;
-    if (isRegister) {
-      localStorage.setItem('user', JSON.stringify({ ...data, role: 'user' }));
-      alert('Registration successful! Please login.');
-      setIsRegister(false);
-      return;
+  const onSubmit = async (data) => {
+    setErrorMsg('');
+    setLoading(true);
+
+    try {
+      if (isRegister) {
+        const res = await fetch(`${API_BASE}/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: data.name, email: data.email, password: data.password, student_id: data.id || '' }),
+        });
+        const result = await res.json();
+        if (result.status === 'ok') {
+          setErrorMsg('');
+          setIsRegister(false);
+          alert('Registration successful! Please sign in.');
+        } else {
+          setErrorMsg(result.message || 'Registration failed');
+        }
+      } else {
+        const res = await fetch(`${API_BASE}/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: data.email, password: data.password }),
+        });
+        const result = await res.json();
+        if (result.status === 'ok') {
+          localStorage.setItem('user', JSON.stringify(result.user));
+          navigate(result.user.role === 'admin' ? '/dashboard' : '/chatbot');
+        } else {
+          setErrorMsg(result.message || 'Invalid credentials');
+        }
+      }
+    } catch {
+      setErrorMsg('Could not connect to the server. Please try again.');
     }
-    let storedUser = null;
-    try { storedUser = JSON.parse(localStorage.getItem('user') || 'null'); } catch { storedUser = null; }
-    if (storedUser && storedUser.email === data.email && storedUser.password === data.password) {
-      localStorage.setItem('user', JSON.stringify(storedUser));
-      navigate('/chatbot');
-      return;
-    }
-    if (hostEmail && data.email === hostEmail && data.password === hostPassword) {
-      localStorage.setItem('user', JSON.stringify({ email: hostEmail, password: hostPassword, role: 'admin', name: 'Host Admin' }));
-      navigate('/dashboard');
-      return;
-    }
-    alert('Invalid credentials');
+
+    setLoading(false);
   };
 
   const validatePassword = (value) => {
@@ -97,6 +119,16 @@ function Login() {
           {isRegister ? 'Create Account' : 'Welcome back'}
         </h2>
 
+        {errorMsg && (
+          <div style={{
+            background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.3)',
+            borderRadius: '10px', padding: '10px 14px', marginBottom: '14px',
+            color: '#f87171', fontSize: '0.85rem', textAlign: 'center',
+          }}>
+            {errorMsg}
+          </div>
+        )}
+
         <form onSubmit={handleSubmit(onSubmit)} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           {isRegister && (
             <>
@@ -115,18 +147,24 @@ function Login() {
             {errors.email && <p style={{ color: '#f87171', fontSize: '0.78rem', marginTop: '4px' }}>{errors.email.message}</p>}
           </div>
           <div>
-            <input {...register('password', { required: 'Password is required', validate: validatePassword })} placeholder="Password" type="password" className="glass-input" />
+            <input {...register('password', { required: 'Password is required', validate: isRegister ? validatePassword : undefined })} placeholder="Password" type="password" className="glass-input" />
             {errors.password && <p style={{ color: '#f87171', fontSize: '0.78rem', marginTop: '4px' }}>{errors.password.message}</p>}
           </div>
 
-          <button type="submit" className="glass-button" style={{ marginTop: '6px', width: '100%', padding: '13px', fontSize: '0.95rem' }}>
-            {isRegister ? 'Sign Up' : 'Sign In'}
+          <button type="submit" className="glass-button" disabled={loading} style={{ marginTop: '6px', width: '100%', padding: '13px', fontSize: '0.95rem', opacity: loading ? 0.6 : 1 }}>
+            {loading ? 'Please wait...' : isRegister ? 'Sign Up' : 'Sign In'}
           </button>
         </form>
 
+        {hostEmail && !isRegister && (
+          <div style={{ marginTop: '14px', textAlign: 'center', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+            Admin: {hostEmail} / Admin@123
+          </div>
+        )}
+
         <div style={{ marginTop: '20px', textAlign: 'center' }}>
           <button
-            onClick={() => setIsRegister(!isRegister)}
+            onClick={() => { setIsRegister(!isRegister); setErrorMsg(''); }}
             style={{
               background: 'none', border: 'none', cursor: 'pointer',
               color: 'var(--accent)', fontSize: '0.88rem', fontWeight: 500,

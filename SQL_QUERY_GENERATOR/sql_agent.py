@@ -58,21 +58,45 @@ def _call_llm_for_sql(prompt_text: str) -> str:
         prompt = f"""
 ### MISSION: GENERATE RAW DATA SELECT QUERIES ONLY.
 
-STRICT RULES (FAILURE TO FOLLOW = CRASH):
-1. FORBIDDEN: NEVER use AVG(), SUM(), MAX(), or COUNT().
-2. FORBIDDEN: NEVER use GROUP BY or HAVING.
-3. FORBIDDEN: DO NOT calculate CGPA in SQL. The Python orchestrator handles all math.
-4. SCHEMA LOCKDOWN: ONLY use 'aiml_academic.' tables.
-5. IDENTITY ANCHOR: If 'GROUND TRUTH IDENTITY' is provided, use that EXACT USN.
-6. RESILIENT JOIN: Always JOIN students s ON r.student_usn = s.student_usn. 
-7. TABLE MAPPING: 'sgpa' is in 'student_semester_results'. 'numeric_marks' is in 'student_subject_results'.
-8. Output RAW SQL only. No markdown. No comments.
+DATABASE SCHEMA (aiml_academic):
+  students(student_usn PK, student_name, admission_year)
+  student_semester_results(semester_result_id PK, session_id FK, student_usn FK, student_name_snapshot, serial_no, sgpa, percentage, grand_total, source_excel_row)
+  result_sessions(session_id PK, session_label)  -- session_label = 'Semester 1', 'Semester 2', etc.
+  semesters(semester_no, study_year, semester_label)
+  student_subject_results(subject_result_id PK, semester_result_id FK, session_subject_id FK, raw_result, numeric_marks, grade_text, result_kind)
+  subjects(subject_id PK, subject_code, subject_name)
+  session_subjects(session_subject_id PK, session_id FK, subject_id FK)
 
-REQUIRED PATTERN:
-SELECT s.student_usn, s.student_name, r.sgpa, r.percentage, r.grand_total 
-FROM aiml_academic.students s 
-JOIN aiml_academic.student_semester_results r ON s.student_usn = r.student_usn 
-WHERE s.student_usn = '[USN]'
+KEY JOINS:
+  students.student_usn = student_semester_results.student_usn
+  student_semester_results.session_id = result_sessions.session_id
+  student_semester_results.semester_result_id = student_subject_results.semester_result_id
+
+STRICT RULES:
+1. FORBIDDEN: NEVER use AVG(), SUM(), MAX(), COUNT(), GROUP BY, HAVING. The Python orchestrator handles all math.
+2. SCHEMA LOCKDOWN: ONLY use 'aiml_academic.' prefix for all tables.
+3. IDENTITY ANCHOR: If 'GROUND TRUTH' is provided, use that EXACT USN in WHERE.
+4. Always SELECT s.student_usn, s.student_name, r.sgpa, r.percentage, r.grand_total, rs.session_label for semester queries.
+5. Always JOIN result_sessions rs ON r.session_id = rs.session_id to get semester labels.
+6. For subject-level queries, JOIN student_subject_results and session_subjects and subjects.
+7. Output RAW SQL only. No markdown. No comments. No explanations.
+8. ORDER BY rs.session_label for semester-wise results.
+
+EXAMPLE (semester results for a student):
+SELECT s.student_usn, s.student_name, r.sgpa, r.percentage, r.grand_total, rs.session_label
+FROM aiml_academic.students s
+JOIN aiml_academic.student_semester_results r ON s.student_usn = r.student_usn
+JOIN aiml_academic.result_sessions rs ON r.session_id = rs.session_id
+WHERE s.student_usn = '1DS20AI001'
+ORDER BY rs.session_label
+
+EXAMPLE (students with SGPA > 9 in a specific semester):
+SELECT s.student_usn, s.student_name, r.sgpa, rs.session_label
+FROM aiml_academic.students s
+JOIN aiml_academic.student_semester_results r ON s.student_usn = r.student_usn
+JOIN aiml_academic.result_sessions rs ON r.session_id = rs.session_id
+WHERE r.sgpa > 9 AND rs.session_label = 'Semester 6'
+ORDER BY r.sgpa DESC
 
 User query & Context:
 {prompt_text}
