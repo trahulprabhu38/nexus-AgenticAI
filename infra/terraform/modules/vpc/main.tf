@@ -24,11 +24,15 @@ resource "aws_subnet" "public_subnet" {
   vpc_id     = aws_vpc.vpc.id
   cidr_block = var.pub_cidr
   map_public_ip_on_launch = true
-  tags = {
-    Name = "nexus"
-    "kubernetes.io/role/elb" = "1"
-    "kubernetes.io/cluster/nexus-eks" = "shared"
-  }
+  
+   tags = merge(
+    var.tags,
+    var.private_subnet_tags,
+    {
+      Name = "${var.name_prefix}-private"
+      Type = "private"
+    }
+  )
 }
 
 #private subnet
@@ -36,11 +40,14 @@ resource "aws_subnet" "private_subnet" {
   vpc_id     = aws_vpc.vpc.id
   cidr_block = var.priv_cidr
  
-  tags = {
-    Name = "nexus"
-    "kubernetes.io/role/internal-elb" = "1"
-    "kubernetes.io/cluster/nexus-eks" = "shared"
-  }
+  tags = merge(
+    var.tags,
+    var.private_subnet_tags,
+    {
+      Name = "${var.name_prefix}-private"
+      Type = "private"
+    }
+  )
 }
 
 #igw

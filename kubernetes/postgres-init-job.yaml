@@ -36,8 +36,9 @@ spec:
                   name: nexus-secrets
                   key: POSTGRES_PASSWORD
       containers:
+        # Uses the backend image which already has the SQL file at /app/db/
         - name: schema-loader
-          image: postgres:16-alpine
+          image: nexus-backend:latest
           command:
             - sh
             - -c
@@ -51,8 +52,9 @@ spec:
                 exit 0
               fi
 
-              echo "Loading schema from /sql/init.sql ($( wc -c < /sql/init.sql ) bytes)..."
-              psql -h postgres -U nexus -d academic_db -f /sql/init.sql
+              SQL_FILE="/app/db/results_aiml_normalized_postgres.sql"
+              echo "Loading schema from $SQL_FILE ($(wc -c < $SQL_FILE) bytes)..."
+              psql -h postgres -U nexus -d academic_db -f "$SQL_FILE"
               echo "Schema loaded successfully."
           env:
             - name: PGPASSWORD
@@ -60,17 +62,3 @@ spec:
                 secretKeyRef:
                   name: nexus-secrets
                   key: POSTGRES_PASSWORD
-          volumeMounts:
-            - name: init-sql
-              mountPath: /sql
-      volumes:
-        - name: init-sql
-          configMap:
-            name: postgres-init-sql
----
-# To create the ConfigMap from the SQL file, run:
-#   kubectl create configmap postgres-init-sql \
-#     --from-file=init.sql=db/results_aiml_normalized_postgres.sql
-#
-# If the file exceeds the ConfigMap 1MB limit, use a PVC or an S3/GCS
-# download step instead. For ~670KB this should work fine.
