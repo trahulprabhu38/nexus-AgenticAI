@@ -1,0 +1,33 @@
+# ── Nexus AgenticAI — Unified Backend Dependencies ──
+# All agents are imported into the synthetic-agent orchestrator,
+# so every dependency lives in one file.
+
+# Web framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0.0
+
+# LLM clients
+openai>=1.50.0
+litellm>=1.0.0
+
+# Database
+psycopg2-binary>=2.9.9
+sqlalchemy>=2.0.0
+sqlparse>=0.5.0
+
+# Column pruning (Gemini LLM)
+langchain>=0.1.0
+langchain-core>=0.1.0
+langchain-google-genai>=0.1.0
+google-generativeai>=0.5.0
+
+# Data handling
+pandas>=2.0.0
+openpyxl>=3.1.0
+pyarrow>=14.0.0
+
+# Environment / utilities
+python-dotenv>=1.0.1
+requests>=2.31.0
+httpx>=0.27.0

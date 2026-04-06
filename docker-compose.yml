@@ -1,0 +1,256 @@
+x-backend-common: &backend-common
+  build:
+    context: .
+    dockerfile: Dockerfile.backend
+  environment: &backend-env
+    AIML_RESULTS_DATABASE_URL: postgresql://nexus:nexus_pass@postgres:5432/academic_db
+    NVIDIA_API_KEY: ${NVIDIA_API_KEY:-}
+    OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+    GOOGLE_API_KEY: ${GOOGLE_API_KEY:-}
+    HOST_EMAIL: ${HOST_EMAIL:-admin@nexus.ai}
+    LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    PYTHONPATH: /app
+  networks:
+    - nexus-net
+  restart: unless-stopped
+  logging: &json-logging
+    driver: "json-file"
+    options:
+      max-size: "15m"
+      max-file: "5"
+
+services:
+  # ════════════════════════════════════════════════════════════════════
+  #  DATABASE
+  # ════════════════════════════════════════════════════════════════════
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nexus
+      POSTGRES_PASSWORD: nexus_pass
+      POSTGRES_DB: academic_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./db/results_aiml_normalized_postgres.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nexus -d academic_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - nexus-net
+    logging:
+      <<: *json-logging
+      options:
+        tag: "postgres"
+
+  # ════════════════════════════════════════════════════════════════════
+  #  AGENT 1: Intent Agent (port 8001)
+  # ════════════════════════════════════════════════════════════════════
+  intent-agent:
+    <<: *backend-common
+    container_name: nexus-intent-agent
+    command: ["uvicorn", "Intent_Agent3.serve:app", "--host", "0.0.0.0", "--port", "8001"]
+    ports:
+      - "8001:8001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      <<: *json-logging
+      options:
+        tag: "intent-agent"
+
+  # ════════════════════════════════════════════════════════════════════
+  #  AGENT 2: Table Agent (port 8002)
+  # ════════════════════════════════════════════════════════════════════
+  table-agent:
+    <<: *backend-common
+    container_name: nexus-table-agent
+    command: ["uvicorn", "table_agent.serve:app", "--host", "0.0.0.0", "--port", "8002"]
+    ports:
+      - "8002:8002"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8002/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      <<: *json-logging
+      options:
+        tag: "table-agent"
+
+  # ════════════════════════════════════════════════════════════════════
+  #  AGENT 3: Column Pruning Agent (port 8003)
+  # ════════════════════════════════════════════════════════════════════
+  column-pruning:
+    <<: *backend-common
+    container_name: nexus-column-pruning
+    command: ["uvicorn", "column_pruning_agent.serve:app", "--host", "0.0.0.0", "--port", "8003"]
+    ports:
+      - "8003:8003"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8003/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      <<: *json-logging
+      options:
+        tag: "column-pruning"
+
+  # ════════════════════════════════════════════════════════════════════
+  #  AGENT 4: SQL Query Generator (port 8004)
+  # ════════════════════════════════════════════════════════════════════
+  sql-generator:
+    <<: *backend-common
+    container_name: nexus-sql-generator
+    command: ["uvicorn", "SQL_QUERY_GENERATOR.serve:app", "--host", "0.0.0.0", "--port", "8004"]
+    ports:
+      - "8004:8004"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8004/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      <<: *json-logging
+      options:
+        tag: "sql-generator"
+
+  # ════════════════════════════════════════════════════════════════════
+  #  AGENT 5: SQL Validator (port 8005)
+  # ════════════════════════════════════════════════════════════════════
+  sql-validator:
+    <<: *backend-common
+    container_name: nexus-sql-validator
+    command: ["uvicorn", "sql_validator_agent.serve:app", "--host", "0.0.0.0", "--port", "8005"]
+    ports:
+      - "8005:8005"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8005/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      <<: *json-logging
+      options:
+        tag: "sql-validator"
+
+  # ════════════════════════════════════════════════════════════════════
+  #  AGENT 6: Audit Agent (port 8006)
+  # ════════════════════════════════════════════════════════════════════
+  audit-agent:
+    <<: *backend-common
+    container_name: nexus-audit-agent
+    command: ["uvicorn", "Audit_agent.serve:app", "--host", "0.0.0.0", "--port", "8006"]
+    ports:
+      - "8006:8006"
+    volumes:
+      - audit-data:/app/Audit_agent
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8006/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    logging:
+      <<: *json-logging
+      options:
+        tag: "audit-agent"
+
+  # ════════════════════════════════════════════════════════════════════
+  #  ORCHESTRATOR / SYNTHESIS AGENT (port 8000)
+  # ════════════════════════════════════════════════════════════════════
+  orchestrator:
+    <<: *backend-common
+    container_name: nexus-orchestrator
+    command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+    working_dir: /app/synthetic-agent
+    ports:
+      - "8000:8000"
+    environment:
+      <<: *backend-env
+      INTENT_AGENT_URL: http://intent-agent:8001
+      TABLE_AGENT_URL: http://table-agent:8002
+      COLUMN_PRUNING_URL: http://column-pruning:8003
+      SQL_GENERATOR_URL: http://sql-generator:8004
+      SQL_VALIDATOR_URL: http://sql-validator:8005
+      AUDIT_AGENT_URL: http://audit-agent:8006
+    depends_on:
+      postgres:
+        condition: service_healthy
+      intent-agent:
+        condition: service_healthy
+      table-agent:
+        condition: service_healthy
+      sql-generator:
+        condition: service_healthy
+      sql-validator:
+        condition: service_healthy
+      audit-agent:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    logging:
+      <<: *json-logging
+      options:
+        tag: "orchestrator"
+
+  # ════════════════════════════════════════════════════════════════════
+  #  FRONTEND (React + Nginx, port 3000)
+  # ════════════════════════════════════════════════════════════════════
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: nexus-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      orchestrator:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - nexus-net
+    restart: unless-stopped
+    logging:
+      <<: *json-logging
+      options:
+        tag: "frontend"
+
+volumes:
+  pgdata:
+  audit-data:
+
+networks:
+  nexus-net:
+    driver: bridge

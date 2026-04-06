@@ -1,36 +1,33 @@
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-import uuid
-import sys
-import os
+"""
+Nexus Orchestrator — Master API Gateway
+Port: 8000
+Coordinates all agent microservices and serves as the frontend's backend.
+"""
+import os, sys
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv
+load_dotenv(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"))
 
-# Load root .env for backend config values
-ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(ROOT_DIR, '.env'))
+import uuid
+import httpx
+from service_utils import create_service
 
-# Add parent dir to path so we can import other agents
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+app, logger = create_service("Nexus Orchestrator", "nexus-orchestrator")
 
 from synthetic_agent import SyntheticAgent
-from db_modifier import db_modifier
 
-app = FastAPI()
+# Service URLs
+INTENT_AGENT_URL = os.getenv("INTENT_AGENT_URL", "http://intent-agent:8001")
+TABLE_AGENT_URL = os.getenv("TABLE_AGENT_URL", "http://table-agent:8002")
+COLUMN_PRUNING_URL = os.getenv("COLUMN_PRUNING_URL", "http://column-pruning:8003")
+SQL_GENERATOR_URL = os.getenv("SQL_GENERATOR_URL", "http://sql-generator:8004")
+SQL_VALIDATOR_URL = os.getenv("SQL_VALIDATOR_URL", "http://sql-validator:8005")
+AUDIT_AGENT_URL = os.getenv("AUDIT_AGENT_URL", "http://audit-agent:8006")
 
-# Enable CORS for frontend
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# In-memory session store
 sessions = {}
 agent = SyntheticAgent()
 
-# Track mock agent states just for UI toggle purposes
+# Track agent states for the frontend toggle UI
 frontend_agents = [
     {"name": "Synthetic_Orchestrator", "enabled": True},
     {"name": "Intent_Agent", "enabled": True},
@@ -40,6 +37,33 @@ frontend_agents = [
     {"name": "SQL_Validator", "enabled": True},
     {"name": "Audit_Agent", "enabled": True},
 ]
+
+
+@app.get("/health")
+async def health():
+    """Aggregated health check — pings all agent services."""
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        checks = {}
+        for name, url in [
+            ("intent_agent", INTENT_AGENT_URL),
+            ("table_agent", TABLE_AGENT_URL),
+            ("column_pruning", COLUMN_PRUNING_URL),
+            ("sql_generator", SQL_GENERATOR_URL),
+            ("sql_validator", SQL_VALIDATOR_URL),
+            ("audit_agent", AUDIT_AGENT_URL),
+        ]:
+            try:
+                r = await client.get(f"{url}/health")
+                checks[name] = r.json().get("status", "unknown")
+            except Exception:
+                checks[name] = "unreachable"
+
+    all_healthy = all(v == "healthy" for v in checks.values())
+    return {
+        "status": "healthy" if all_healthy else "degraded",
+        "service": "nexus-orchestrator",
+        "agents": checks,
+    }
 
 
 @app.post("/chat/session")
@@ -67,40 +91,51 @@ async def toggle_agent(action: str, agent_name: str):
 async def send_message(session_id: str, text: str, persona: str = "default"):
     if session_id not in sessions:
         sessions[session_id] = {"history": []}
-    
-    # Process through orchestrator
+
+    logger.info("Chat: session=%s, persona=%s, query=%s", session_id, persona, text[:80])
+
     result = await agent.orchestrate(text, persona, sessions[session_id]["history"])
-    
-    # Save to history
+
     sessions[session_id]["history"].append({"user": text, "bot": result["response"]})
-    
+
+    logger.info("Response: session=%s, intent=%s, duration=%ss", session_id, result.get("intent"), result.get("duration"))
     return result
 
 
 @app.post("/chat/modify")
 async def modify_database(text: str, email: str):
-    """
-    Direct endpoint for INSERT/UPDATE operations.
-    """
-    result = await db_modifier.process_modification(text, email)
-    return result
+    """Direct endpoint for INSERT/UPDATE operations."""
+    try:
+        from db_modifier import db_modifier
+        result = await db_modifier.process_modification(text, email)
+        return result
+    except Exception as e:
+        logger.error("DB modification failed: %s", e)
+        return {"status": "error", "message": str(e)}
+
 
 @app.get("/audit/metrics")
 async def get_audit_metrics():
-    if agent.audit_agent:
-        return agent.audit_agent.get_metrics()
-    return {"error": "Audit agent not available."}
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(f"{AUDIT_AGENT_URL}/metrics")
+            return r.json()
+    except Exception as e:
+        return {"error": f"Audit agent unavailable: {e}"}
+
 
 @app.post("/audit/feedback")
-async def submit_audit_feedback(session_id: str, feedback: str, email: str = "guest@nexus.ai"):
-    if agent.audit_agent:
-        entry = agent.audit_agent.submit_feedback(session_id, feedback, email)
-        return {"status": "ok", "entry": entry}
-    return {"status": "error", "reason": "Audit agent not available."}
+async def submit_feedback(session_id: str, feedback: str, email: str = "guest@nexus.ai"):
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.post(f"{AUDIT_AGENT_URL}/feedback", json={
+                "session_id": session_id, "feedback": feedback, "email": email,
+            })
+            return r.json()
+    except Exception as e:
+        return {"status": "error", "reason": str(e)}
+
 
 if __name__ == "__main__":
     import uvicorn
-    # Check DB before startup
-    from table_agent.ranker import _database_url
-    print(f"Starting server... Connected to DB check: {'Passed' if _database_url() else 'Warning: No DB URL'}")
     uvicorn.run(app, host="0.0.0.0", port=8000)

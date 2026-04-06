@@ -1,8 +1,8 @@
 /**
- * Backend origin for Nexus (FastAPI + Table Agent).
+ * Backend origin for Nexus (FastAPI).
  *
- * Dev default is 8012 so /table-agent/rank and table_agent registration match
- * the current codebase. Override with REACT_APP_API_URL if needed.
+ * In Docker production: REACT_APP_API_URL=/api (nginx proxies to backend:8000)
+ * In local dev: defaults to http://127.0.0.1:8000
  */
 export function getApiBase() {
   const v = process.env.REACT_APP_API_URL;
@@ -12,5 +12,5 @@ export function getApiBase() {
   if (process.env.NODE_ENV === 'development') {
     return 'http://127.0.0.1:8000';
   }
-  return 'http://127.0.0.1:8000';
+  return '/api';
 }
