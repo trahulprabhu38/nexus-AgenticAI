@@ -92,10 +92,10 @@ function Chatbot() {
   // Save chat to MongoDB
   const saveToMongo = async (chatId, title, msgs) => {
     try {
-      await fetch(`${API_BASE}/chat/history/save?session_id=${encodeURIComponent(chatId)}&email=${encodeURIComponent(userEmail)}&title=${encodeURIComponent(title)}`, {
+      await fetch(`${API_BASE}/chat/history/save`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(msgs),
+        body: JSON.stringify({ session_id: chatId, email: userEmail, title: title, messages: msgs }),
       });
     } catch {}
   };

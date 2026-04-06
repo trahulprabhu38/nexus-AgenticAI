@@ -108,7 +108,7 @@ async def host_email():
 
 @app.post("/auth/register")
 async def register_user(req: RegisterRequest):
-    if not users_col:
+    if users_col is None:
         return {"status": "error", "message": "Database unavailable"}
     # Check if admin email
     if req.email.lower() == HOST_EMAIL.lower():
@@ -135,7 +135,7 @@ async def login_user(req: LoginRequest):
     if req.email.lower() == HOST_EMAIL.lower() and req.password == HOST_PASSWORD:
         return {"status": "ok", "user": {"email": HOST_EMAIL, "name": "Host Admin", "role": "admin"}}
 
-    if not users_col:
+    if users_col is None:
         return {"status": "error", "message": "Database unavailable"}
 
     user = users_col.find_one({"email": req.email.lower(), "password": _hash_pw(req.password)})
@@ -153,7 +153,7 @@ class SaveChatRequest(BaseModel):
 
 @app.post("/chat/history/save")
 async def save_chat_history(req: SaveChatRequest):
-    if not chats_col:
+    if chats_col is None:
         return {"status": "error"}
     from datetime import datetime
     chats_col.update_one(
@@ -166,7 +166,7 @@ async def save_chat_history(req: SaveChatRequest):
 
 @app.get("/chat/history/{email}")
 async def get_chat_history(email: str):
-    if not chats_col:
+    if chats_col is None:
         return []
     chats = list(chats_col.find({"email": email.lower()}, {"_id": 0}).sort("updated_at", -1).limit(50))
     return chats

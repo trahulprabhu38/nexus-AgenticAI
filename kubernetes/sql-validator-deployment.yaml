@@ -1,27 +1,27 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: intent-agent
+  name: sql-validator
   labels:
-    app: intent-agent
+    app: sql-validator
     tier: agent
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: intent-agent
+      app: sql-validator
   template:
     metadata:
       labels:
-        app: intent-agent
+        app: sql-validator
         tier: agent
     spec:
       containers:
-        - name: intent-agent
+        - name: sql-validator
           image: nexus-backend:latest
-          command: ["uvicorn", "Intent_Agent3.serve:app", "--host", "0.0.0.0", "--port", "8001"]
+          command: ["uvicorn", "sql_validator_agent.serve:app", "--host", "0.0.0.0", "--port", "8005"]
           ports:
-            - containerPort: 8001
+            - containerPort: 8005
           envFrom:
             - configMapRef:
                 name: nexus-config
@@ -30,13 +30,13 @@ spec:
           readinessProbe:
             httpGet:
               path: /health
-              port: 8001
+              port: 8005
             initialDelaySeconds: 10
             periodSeconds: 15
           livenessProbe:
             httpGet:
               path: /health
-              port: 8001
+              port: 8005
             initialDelaySeconds: 20
             periodSeconds: 30
           resources:

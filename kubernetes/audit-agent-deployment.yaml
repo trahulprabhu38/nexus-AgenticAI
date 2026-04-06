@@ -1,27 +1,27 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: intent-agent
+  name: audit-agent
   labels:
-    app: intent-agent
+    app: audit-agent
     tier: agent
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: intent-agent
+      app: audit-agent
   template:
     metadata:
       labels:
-        app: intent-agent
+        app: audit-agent
         tier: agent
     spec:
       containers:
-        - name: intent-agent
+        - name: audit-agent
           image: nexus-backend:latest
-          command: ["uvicorn", "Intent_Agent3.serve:app", "--host", "0.0.0.0", "--port", "8001"]
+          command: ["uvicorn", "Audit_agent.serve:app", "--host", "0.0.0.0", "--port", "8006"]
           ports:
-            - containerPort: 8001
+            - containerPort: 8006
           envFrom:
             - configMapRef:
                 name: nexus-config
@@ -30,13 +30,13 @@ spec:
           readinessProbe:
             httpGet:
               path: /health
-              port: 8001
+              port: 8006
             initialDelaySeconds: 10
             periodSeconds: 15
           livenessProbe:
             httpGet:
               path: /health
-              port: 8001
+              port: 8006
             initialDelaySeconds: 20
             periodSeconds: 30
           resources:

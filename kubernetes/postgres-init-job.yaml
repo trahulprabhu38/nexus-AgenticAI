@@ -1,0 +1,76 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: postgres-schema-init
+  labels:
+    app: postgres
+    component: schema-init
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        app: postgres
+        component: schema-init
+    spec:
+      restartPolicy: OnFailure
+      initContainers:
+        # Wait for Postgres to be ready before running the schema
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Postgres to accept connections..."
+              until pg_isready -h postgres -U nexus -d academic_db; do
+                echo "Postgres not ready yet, retrying in 3s..."
+                sleep 3
+              done
+              echo "Postgres is ready."
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nexus-secrets
+                  key: POSTGRES_PASSWORD
+      containers:
+        - name: schema-loader
+          image: postgres:16-alpine
+          command:
+            - sh
+            - -c
+            - |
+              echo "Checking if schema already exists..."
+              TABLE_COUNT=$(psql -h postgres -U nexus -d academic_db -tAc \
+                "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'aiml_academic';")
+
+              if [ "$TABLE_COUNT" -gt "0" ]; then
+                echo "Schema aiml_academic already has $TABLE_COUNT tables — skipping init."
+                exit 0
+              fi
+
+              echo "Loading schema from /sql/init.sql ($( wc -c < /sql/init.sql ) bytes)..."
+              psql -h postgres -U nexus -d academic_db -f /sql/init.sql
+              echo "Schema loaded successfully."
+          env:
+            - name: PGPASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: nexus-secrets
+                  key: POSTGRES_PASSWORD
+          volumeMounts:
+            - name: init-sql
+              mountPath: /sql
+      volumes:
+        - name: init-sql
+          configMap:
+            name: postgres-init-sql
+---
+# To create the ConfigMap from the SQL file, run:
+#   kubectl create configmap postgres-init-sql \
+#     --from-file=init.sql=db/results_aiml_normalized_postgres.sql
+#
+# If the file exceeds the ConfigMap 1MB limit, use a PVC or an S3/GCS
+# download step instead. For ~670KB this should work fine.

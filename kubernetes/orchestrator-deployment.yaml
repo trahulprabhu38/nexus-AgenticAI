@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orchestrator
+  labels:
+    app: orchestrator
+    tier: orchestrator
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: orchestrator
+  template:
+    metadata:
+      labels:
+        app: orchestrator
+        tier: orchestrator
+    spec:
+      containers:
+        - name: orchestrator
+          image: nexus-backend:latest
+          command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+          workingDir: /app/synthetic-agent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: nexus-config
+            - secretRef:
+                name: nexus-secrets
+          env:
+            - name: INTENT_AGENT_URL
+              value: http://intent-agent:8001
+            - name: TABLE_AGENT_URL
+              value: http://table-agent:8002
+            - name: COLUMN_PRUNING_URL
+              value: http://column-pruning:8003
+            - name: SQL_GENERATOR_URL
+              value: http://sql-generator:8004
+            - name: SQL_VALIDATOR_URL
+              value: http://sql-validator:8005
+            - name: AUDIT_AGENT_URL
+              value: http://audit-agent:8006
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "300m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
