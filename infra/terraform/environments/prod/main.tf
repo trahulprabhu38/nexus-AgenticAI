@@ -17,7 +17,7 @@ module "vpc" {
         "kubernetes.io/role/internal-elb"           = "1"
         "kubernetes.io/cluster/${var.cluster_name}" = "shared"
     }
-
+ 
     tags = {
         Environment = var.environment
         Terraform   = "true"
