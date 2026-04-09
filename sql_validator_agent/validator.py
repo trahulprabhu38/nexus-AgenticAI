@@ -48,9 +48,14 @@ class SQLValidator:
         for token in stmt.tokens:
             if isinstance(token, sqlparse.sql.IdentifierList):
                 for identifier in token.get_identifiers():
-                    tables.add(identifier.get_real_name())
+                    if isinstance(identifier, sqlparse.sql.Identifier):
+                        name = identifier.get_real_name()
+                        if name:
+                            tables.add(name)
             elif isinstance(token, sqlparse.sql.Identifier):
-                tables.add(token.get_real_name())
+                name = token.get_real_name()
+                if name:
+                    tables.add(name)
 
         # metadata.tables keys are in the format "schema.tablename" (e.g. "aiml_academic.students")
         valid_table_keys = self.metadata.tables.keys()

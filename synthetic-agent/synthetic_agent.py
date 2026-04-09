@@ -176,6 +176,7 @@ class SyntheticAgent:
         sql_query = ""
         rows = []
         kept_cols = []
+        is_aggregate_query = bool(re.search(r'\b(all|list|every|top|highest|lowest|average|avg|count|how many|students with|batch|year|admission)\b', text, re.IGNORECASE))
 
         if not is_conversational:
             # Filter tables to aiml_academic schema (table_id carries the aiml_ prefix)
@@ -199,8 +200,13 @@ class SyntheticAgent:
 
                 # 3. SQL Generation — pass actual DB table names from aiml_academic schema
                 db_tables = ["students", "student_semester_results", "student_subject_results", "semesters", "subjects", "session_subjects", "result_sessions"]
+                # Extract batch/admission year hint for SQL generator
+                batch_year_match = re.search(r'\b(20\d{2})\b', text)
+                batch_hint = ""
+                if is_aggregate_query and batch_year_match:
+                    batch_hint = f"\nIMPORTANT: This is a BATCH/AGGREGATE query for admission_year={batch_year_match.group(1)}. Fetch ALL semesters for ALL students in that batch. Use: WHERE s.admission_year = {batch_year_match.group(1)} — do NOT add any semester filter."
                 sql_query = await self._call_sql_gen(
-                    f"{text}\nContext hint: {context_str}",
+                    f"{text}\nContext hint: {context_str}{batch_hint}",
                     intent=intent, tables=db_tables, columns=kept_cols,
                 )
                 if sql_query:
@@ -222,7 +228,7 @@ class SyntheticAgent:
                 with engine.connect() as conn:
                     usn_match = re.search(r"\b1DS\d{2}[A-Z]{2}\d{3}\b", text, re.IGNORECASE)
                     # Extract proper name: strip common query words to isolate the student name
-                    name_text = re.sub(r'\b(what|who|is|the|of|for|get|show|find|me|my|cgpa|sgpa|usn|result|results|marks|grade|gpa|semester|sem|student|name|tell|about|details|give|please|wise|all|list|how|much|many|can|you|has|have|their|percentage|total|score|performance|academic|record|records)\b', '', text, flags=re.IGNORECASE).strip()
+                    name_text = re.sub(r'\b(what|who|is|the|of|for|get|show|find|me|my|cgpa|sgpa|usn|result|results|marks|grade|gpa|semester|sem|student|name|tell|about|details|give|please|wise|all|list|how|much|many|can|you|has|have|their|percentage|total|score|performance|academic|record|records|average|avg|highest|lowest|maximum|minimum|max|min|count|top|bottom|rank|ranking|ranked|above|below|between|across|and|or|in|with|by|on|at|a|an)\b', '', text, flags=re.IGNORECASE).strip()
                     name_text = re.sub(r'\s+', ' ', name_text).strip()
                     if usn_match:
                         search_term = usn_match.group(0)
@@ -250,7 +256,7 @@ class SyntheticAgent:
                 table_candidates=[t.get("table_id") for t in schema_tables],
                 column_whitelist=kept_cols,
             )
-            retrieved = retriever_result.get("results", [])
+            retrieved = retriever_result.get("evidence", retriever_result.get("results", []))
             if retrieved:
                 snippets = [r.get("text") or r.get("content") or str(r) for r in retrieved[:5]]
                 retriever_context = "\nRetrieved Context:\n" + "\n".join(f"- {s}" for s in snippets)
@@ -315,7 +321,8 @@ class SyntheticAgent:
                             else:
                                 raise first_err
 
-                        rows = [dict(row._mapping) for row in result.fetchmany(20)]
+                        fetch_limit = 500 if is_aggregate_query else 50
+                        rows = [dict(row._mapping) for row in result.fetchmany(fetch_limit)]
                         context_str += f"\nDatabase Results: {rows}"
                         reasoning_parts.append(f"Fetched {len(rows)} rows")
                 except Exception as e:
@@ -324,19 +331,51 @@ class SyntheticAgent:
         # 6. Intelligence: CGPA calculation & ambiguity detection
         final_context = context_str
         try:
-            from collections import Counter
+            from collections import Counter, defaultdict
             student_counts = Counter([r.get('student_usn') for r in rows if r.get('student_usn')])
-            if len(student_counts) > 1:
+            if is_aggregate_query and len(student_counts) > 1:
+                # Batch/aggregate query: compute per-student CGPA then overall average
+                student_sgpas = defaultdict(list)
+                student_names = {}
+                for r in rows:
+                    usn = r.get('student_usn')
+                    sgpa = r.get('sgpa')
+                    if usn and sgpa is not None:
+                        student_sgpas[usn].append(float(sgpa))
+                        student_names[usn] = r.get('student_name') or r.get('student_name_snapshot') or usn
+                if student_sgpas:
+                    per_student_cgpa = {
+                        usn: round(sum(sgpas) / len(sgpas), 2)
+                        for usn, sgpas in student_sgpas.items()
+                    }
+                    all_cgpas = list(per_student_cgpa.values())
+                    batch_avg = round(sum(all_cgpas) / len(all_cgpas), 2)
+                    # Build compact summary for LLM (top 30 to keep prompt size manageable)
+                    sorted_students = sorted(per_student_cgpa.items(), key=lambda x: x[1], reverse=True)
+                    summary_rows = [
+                        {"usn": usn, "name": student_names.get(usn, usn), "cgpa": cgpa}
+                        for usn, cgpa in sorted_students[:60]
+                    ]
+                    final_context = (
+                        f"Target Table: students + student_semester_results. "
+                        f"BATCH_AVERAGE_CGPA: {batch_avg} across {len(per_student_cgpa)} students.\n"
+                        f"PER_STUDENT_CGPA (sorted by CGPA desc):\n"
+                        + "\n".join(f"  {r['name']} ({r['usn']}): {r['cgpa']}" for r in summary_rows)
+                    )
+                    reasoning_parts.append(f"Batch CGPA: avg={batch_avg}, n={len(per_student_cgpa)}")
+            elif len(student_counts) == 1:
+                # Single student: compute CGPA
+                sgpas = [float(r.get('sgpa')) for r in rows if r.get('sgpa') is not None]
+                if sgpas:
+                    cgpa = round(sum(sgpas) / len(sgpas), 2)
+                    final_context += f"\nCALCULATED_CGPA: {cgpa} (Avg of {len(sgpas)} semesters: {sgpas})"
+            elif len(student_counts) > 1 and not is_aggregate_query:
+                # Ambiguous single-student query returned multiple students
                 ambiguity_list = list(set([
                     f"{r.get('student_usn')} ({r.get('student_name') or r.get('student_name_snapshot')})"
                     for r in rows
                 ]))
                 final_context += f"\nAMBIGUITY DETECTED: Multiple students found: {ambiguity_list}"
-            else:
-                sgpas = [float(r.get('sgpa')) for r in rows if r.get('sgpa') is not None]
-                if sgpas:
-                    cgpa = round(sum(sgpas) / len(sgpas), 2)
-                    final_context += f"\nCALCULATED_CGPA: {cgpa} (Avg of {len(sgpas)} semesters: {sgpas})"
         except Exception:
             pass
 
@@ -362,7 +401,8 @@ RESPONSE STYLE:
 - For single-value questions (USN, CGPA, name): state the answer clearly in 1-2 sentences, then optionally add a small note.
 - For multi-row data (semester-wise results): use a clean Markdown table, with a brief sentence before/after summarizing the trend.
 - If 'CALCULATED_CGPA' is present, highlight it naturally: e.g. "Abdur Rahman's CGPA is **8.5**, averaged across 6 semesters."
-- Keep it under 200 words. No introductions, no conclusions, no methodology sections, no recommendations.
+- If 'BATCH_AVERAGE_CGPA' is present, lead with the batch average (e.g. "The average CGPA of batch 2020 is **7.52**"), then show a table of student name + CGPA sorted by CGPA descending. Keep the table concise.
+- Keep it under 300 words for batch queries, 150 words for single-student queries.
 - Never make up data. If no records match, say so helpfully and suggest what they could search instead.
 - Do NOT repeat the same data in multiple formats."""
 
@@ -377,7 +417,6 @@ RESPONSE STYLE:
             logger.error("LLM synthesis failed: %s", e)
 
         # Anti-hallucination guard: if no data was found for a SPECIFIC student query, don't let the LLM invent answers
-        is_aggregate_query = bool(re.search(r'\b(all|list|every|top|highest|lowest|average|count|how many|students with)\b', text, re.IGNORECASE))
         if not is_conversational and not rows and not master_identity and not is_aggregate_query:
             # Check if LLM is hallucinating numbers/data despite having no DB results
             has_hallucinated = bool(re.search(r'\b\d+\.\d+\b', final_resp)) and "not found" not in final_resp.lower() and "no record" not in final_resp.lower() and "couldn't find" not in final_resp.lower()

@@ -2,7 +2,6 @@ FROM python:3.11-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
-ENV PYTHONPATH=/app
 
 WORKDIR /app
 
@@ -15,6 +14,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 8004
+RUN mkdir -p /app/sample_data
 
-CMD ["uvicorn", "serve:app", "--host", "0.0.0.0", "--port", "8004"]
+EXPOSE 8007
+
+CMD ["sh", "-c", "python build_index.py && uvicorn api:app --host 0.0.0.0 --port 8007"]

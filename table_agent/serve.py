@@ -14,7 +14,7 @@ from service_utils import create_service
 
 app, logger = create_service("Nexus Table Agent", "table-agent")
 
-from table_agent.ranker import rank_tables, _database_url
+from ranker import rank_tables, _database_url
 
 
 class RankRequest(BaseModel):

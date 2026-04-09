@@ -3,7 +3,8 @@ import re
 import asyncio
 from openai import AsyncOpenAI
 from sqlalchemy import create_engine, text
-from table_agent.ranker import _database_url
+def _database_url() -> str:
+    return os.getenv("AIML_RESULTS_DATABASE_URL", "")
 from dotenv import load_dotenv
 
 # Load master .env from root

@@ -1,141 +1,170 @@
 """
-ColumnPruningAgent — BaseAgent wrapper for integration into the Nexus dispatcher.
+Column Pruning Agent
+====================
+Implements greedy column selection per the architecture spec:
+  - Static keyword relevance: map query words to column names
+  - Always keep PK/FK columns (ids, usn, codes)
+  - LLM greedy pruning: "Which columns do I need to answer X?"
+  - Fallback: heuristic keyword scoring when LLM unavailable
 
-Wraps the logic from `column pruning/column_agent.py` so it can be registered
-with the Intent_Agent3 dispatcher and respond to chat messages.
-
-Chat behaviour:
-  - If the message contains a list of columns (comma/newline separated on the
-    second line) it will prune them using the offline heuristic (no LLM / API key needed).
-  - Otherwise it explains what the agent does and how to use it.
-
-The full LLM-powered pruning (with GOOGLE_API_KEY) is exposed via a dedicated
-FastAPI router — see column_pruning_router.py.
+Input:  query (str) + table_id (str) + columns (list, optional)
+Output: kept (list), dropped (list), mode (str), table (str)
 """
-import sys
 import os
-import sqlite3
-import asyncio
+import re
+import json
+import logging
+from openai import OpenAI
+from dotenv import load_dotenv
 
-# Make sure the sibling "column pruning" folder is importable
-_CP_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "column pruning")
-if _CP_DIR not in sys.path:
-    sys.path.insert(0, _CP_DIR)
+load_dotenv()
+logger = logging.getLogger("column-pruning")
 
-from Intent_Agent3.base import BaseAgent, Message  # noqa: E402
-from .utils import fetch_table_columns, fetch_table_data
+# ── Schema registry (mirrors aiml_academic schema) ────────────────────
+SCHEMA_REGISTRY: dict[str, list[str]] = {
+    "semesters": [
+        "semester_no", "study_year", "semester_label"
+    ],
+    "students": [
+        "student_usn", "student_name", "admission_year"
+    ],
+    "subjects": [
+        "subject_code", "subject_label"
+    ],
+    "result_sessions": [
+        "session_id", "source_folder_year", "semester_no",
+        "session_label", "study_year", "result_scale"
+    ],
+    "session_subjects": [
+        "session_subject_id", "session_id", "subject_code", "subject_order"
+    ],
+    "student_semester_results": [
+        "semester_result_id", "session_id", "student_usn",
+        "student_name_snapshot", "sgpa", "percentage", "grand_total"
+    ],
+    "student_subject_results": [
+        "subject_result_id", "semester_result_id", "session_subject_id",
+        "raw_result", "numeric_marks", "grade_text", "result_kind"
+    ],
+}
+
+# ── PK / FK column patterns (always kept) ─────────────────────────────
+_PK_FK_SUFFIXES = ("_id", "_usn", "_no", "_code")
 
 
-HELP_TEXT = (
-    "I am the **Column Pruning Agent**.\n\n"
-    "I automatically find the best matching table in your database and prune its columns based on your query.\n\n"
-    "**Example Queries:**\n"
-    "- 'prune columns for 3rd sem results'\n"
-    "- 'filter features for academic year 2023'\n\n"
-    "For the full LLM-powered experience with visual results, visit /column-pruning."
-)
+def _is_pk_fk(col: str) -> bool:
+    return col.endswith(_PK_FK_SUFFIXES)
 
 
-class ColumnPruningAgent(BaseAgent):
+def _resolve_columns(table_id: str, provided: list[str]) -> tuple[str, list[str]]:
+    """Strip schema prefix and look up columns from registry if not provided."""
+    # Handle 'aiml_academic.students' or just 'students'
+    table_name = table_id.split(".")[-1].strip()
+    columns = provided if provided else SCHEMA_REGISTRY.get(table_name, [])
+    return table_name, columns
 
+
+def _keyword_score(query: str, col: str) -> float:
+    """Compute relevance of a column to a query via token overlap."""
+    q_tokens = set(re.sub(r"[^\w]", " ", query.lower()).split())
+    c_tokens = set(re.sub(r"_", " ", col.lower()).split())
+    if not c_tokens:
+        return 0.0
+    return len(q_tokens & c_tokens) / len(c_tokens)
+
+
+def _heuristic_prune(query: str, table_name: str, all_cols: list[str]) -> dict:
+    """Keyword-based fallback pruning."""
+    pk_fk = [c for c in all_cols if _is_pk_fk(c)]
+    non_key = [c for c in all_cols if not _is_pk_fk(c)]
+
+    scored = sorted(
+        [(c, _keyword_score(query, c)) for c in non_key],
+        key=lambda x: x[1],
+        reverse=True,
+    )
+    # Keep top-half relevant columns (minimum 3)
+    top_n = max(3, len(non_key) // 2)
+    # If scores are all zero (no overlap), keep first top_n
+    relevant = [c for c, s in scored[:top_n]]
+
+    kept = list(dict.fromkeys(pk_fk + relevant))  # preserve order, deduplicate
+    dropped = [c for c in all_cols if c not in kept]
+
+    return {"kept": kept, "dropped": dropped, "mode": "heuristic", "table": table_name}
+
+
+def _llm_prune(api_key: str, query: str, table_name: str, all_cols: list[str]) -> list[str] | None:
+    """
+    Ask LLM: 'Given this query and table schema, which columns do I need?'
+    Returns a list of column names, or None on failure.
+    """
+    try:
+        kwargs: dict = {"api_key": api_key, "timeout": 15.0}
+        if api_key.startswith("nvapi-"):
+            kwargs["base_url"] = "https://integrate.api.nvidia.com/v1"
+            model = "meta/llama-3.1-8b-instruct"
+        else:
+            model = "gpt-3.5-turbo"
+
+        client = OpenAI(**kwargs)
+        schema_str = f"{table_name}({', '.join(all_cols)})"
+        prompt = (
+            f"You are a database column selector.\n"
+            f"User query: \"{query}\"\n"
+            f"Table schema: {schema_str}\n\n"
+            f"Select the minimum columns needed to answer the query.\n"
+            f"RULES:\n"
+            f"1. Always include columns ending in _id, _usn, _no, _code (keys).\n"
+            f"2. Return ONLY a JSON array of column names from the schema, nothing else.\n"
+            f"Example: [\"student_usn\", \"student_name\", \"sgpa\"]"
+        )
+
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=150,
+            temperature=0,
+        )
+        content = resp.choices[0].message.content.strip()
+        match = re.search(r"\[.*?\]", content, re.DOTALL)
+        if match:
+            selected = json.loads(match.group(0))
+            # Validate — only keep columns that exist in the schema
+            return [c for c in selected if c in all_cols]
+    except Exception as e:
+        logger.warning("LLM prune failed: %s", e)
+    return None
+
+
+class ColumnPruneAgent:
     def __init__(self):
-        super().__init__("column_pruning_agent")
-        self._agent = None  # lazy-load
+        self.api_key = os.getenv("NVIDIA_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
+        if self.api_key:
+            logger.info("ColumnPruneAgent: LLM mode enabled")
+        else:
+            logger.info("ColumnPruneAgent: heuristic-only mode (no API key)")
 
-    def _get_agent(self):
-        if self._agent is None:
-            try:
-                from column_agent import ColumnPruningAgent as _CPA  # from column pruning/
-                self._agent = _CPA()
-            except Exception:
-                self._agent = None
-        return self._agent
+    def prune(self, query: str, table_id: str, columns: list[str]) -> dict:
+        table_name, all_cols = _resolve_columns(table_id, columns)
 
-    async def handle_message(self, message: Message) -> Message:
-        query = message.text.strip()
-        
-        # 1. Rank tables
-        try:
-            from table_agent.ranker import rank_tables
-        except ImportError:
-            return Message(sender="column_pruning_agent", text="Internal error: Could not import TableAgent ranker.")
+        if not all_cols:
+            logger.warning("No columns found for table_id=%s", table_id)
+            return {"kept": [], "dropped": [], "mode": "passthrough", "table": table_name}
 
-        tables, err = await asyncio.to_thread(rank_tables, query, top_k=1)
-        if err or not tables:
-            return Message(
-                sender="column_pruning_agent", 
-                text=f"I couldn't find a matching database table for your query. {err or ''}\n\n{HELP_TEXT}"
-            )
-        
-        top_table = tables[0]
-        table_id = top_table["table_id"]
-        table_alias = top_table["table"]
+        # Ensure PK/FK columns are always in the final set
+        pk_fk = [c for c in all_cols if _is_pk_fk(c)]
 
-        # 2. Fetch Columns
-        db_type = top_table.get("db_type", "postgres")
-        # Ensure we use the source_file (sqlite://Prefix) if it's a local DB
-        lookup_id = top_table.get("source_file") if db_type == "sqlite" else table_id
-        
-        try:
-            columns = await asyncio.to_thread(fetch_table_columns, lookup_id)
-        except Exception as e:
-            return Message(sender="column_pruning_agent", text=f"Error fetching database columns: {e}")
+        # Try LLM pruning
+        if self.api_key:
+            llm_result = _llm_prune(self.api_key, query, table_name, all_cols)
+            if llm_result:
+                kept = list(dict.fromkeys(pk_fk + llm_result))
+                dropped = [c for c in all_cols if c not in kept]
+                logger.info("LLM prune: table=%s kept=%d dropped=%d", table_name, len(kept), len(dropped))
+                return {"kept": kept, "dropped": dropped, "mode": "llm", "table": table_name}
 
-        if not columns:
-            return Message(sender="column_pruning_agent", text=f"The matched table '{table_alias}' seems to have no columns.")
-
-        # 3. Prune
-        agent = self._get_agent()
-        has_key = bool(os.getenv("GOOGLE_API_KEY", "").strip())
-
-        try:
-            if agent is None:
-                # Fallback to very simple keyword match
-                q_low = query.lower()
-                kept = [c for c in columns if c.lower() in q_low or any(t in c.lower() for t in q_low.split())]
-                if not kept: kept = columns[:5]
-                reasons = {c: "Keyword match" for c in kept}
-            elif not has_key:
-                # Offline heuristic
-                kept = await asyncio.to_thread(agent.prune_offline_simple, query, columns)
-                reasons = {c: "Heuristic match" for c in kept}
-            else:
-                # LLM
-                kept, reasons, _ = await asyncio.to_thread(agent.prune_with_reason, query, columns)
-
-            dropped = [c for c in columns if c not in kept]
-            
-            # 4. Fetch actual data rows (passed query for smart filtering)
-            data_rows = await asyncio.to_thread(fetch_table_data, lookup_id, kept, query=query, limit=15)
-            
-            data_md = ""
-            if data_rows:
-                headers = list(data_rows[0].keys())
-                header_row = "| " + " | ".join(headers) + " |"
-                sep_row = "| " + " | ".join(["---"] * len(headers)) + " |"
-                body_rows = []
-                for row in data_rows:
-                    body_rows.append("| " + " | ".join(str(row.get(h, "")) for h in headers) + " |")
-                
-                data_md = f"\n\n### 📊 Data Preview (Top {len(data_rows)})\n\n{header_row}\n{sep_row}\n" + "\n".join(body_rows)
-            else:
-                data_md = "\n\n_(No records found matching this session in the database.)_"
-
-            response = (
-                f"🎯 **Matched Table:** {table_alias} (`{table_id}`)\n\n"
-                f"✅ **Keep ({len(kept)}/{len(columns)}):** {', '.join(kept)}\n"
-                f"❌ **Drop:** {', '.join(dropped) if dropped else 'none'}\n\n"
-                f"**Reasoning Sample:** {next(iter(reasons.values())) if reasons else 'N/A'}"
-                f"{data_md}\n\n"
-                f"_Visit /column-pruning for the full visual breakdown._"
-            )
-
-            return Message(
-                sender="column_pruning_agent",
-                text=response,
-                metadata={"kept": kept, "dropped": dropped, "table": table_id},
-            )
-
-        except Exception as e:
-            return Message(sender="column_pruning_agent", text=f"Error during pruning: {e}")
-
+        # Fallback to heuristic
+        result = _heuristic_prune(query, table_name, all_cols)
+        logger.info("Heuristic prune: table=%s kept=%d dropped=%d", table_name, len(result["kept"]), len(result["dropped"]))
+        return result

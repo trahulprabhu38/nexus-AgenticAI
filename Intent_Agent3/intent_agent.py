@@ -19,7 +19,7 @@ Paper reference (Section 4.5, Eq. 5):
 
 import math
 import re
-from Intent_Agent3.base import BaseAgent, Message
+from base import BaseAgent, Message
 
 # ---------------------------------------------------------------------------
 # Domain definitions

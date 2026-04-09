@@ -13,7 +13,7 @@ from service_utils import create_service
 
 app, logger = create_service("Nexus Intent Agent", "intent-agent")
 
-from Intent_Agent3.intent_agent import HierarchicalIntentAgent
+from intent_agent import HierarchicalIntentAgent
 agent = HierarchicalIntentAgent()
 logger.info("HierarchicalIntentAgent loaded")
 

@@ -7,12 +7,15 @@ import numpy as np
 embedder = Embedder()
 
 def semantic_search(query, top_k=5):
-    index, meta = load_index()
+    try:
+        index, meta = load_index()
+    except FileNotFoundError:
+        return []
+
     qv = embedder.embed([query])
-    # index.search expects shape (n,dim)
-    D,I = index.search(qv, top_k)
+    D, I = index.search(qv, top_k)
     results = []
-    scores = D[0]  # inner product scores (cosine if normalized)
+    scores = D[0]
     idxs = I[0]
     for sc, idx in zip(scores, idxs):
         if idx < 0:
@@ -20,10 +23,9 @@ def semantic_search(query, top_k=5):
         m = meta[idx]
         results.append({
             "type": "text_chunk",
-            "score": float(sc),    # may be in [-1,1] if not normalized earlier; we normalized
+            "score": float(sc),
             "meta": m
         })
-    # normalize scores to [0,1] based on min/max in this batch (defensive)
     if results:
         scs = [r["score"] for r in results]
         mn, mx = min(scs), max(scs)

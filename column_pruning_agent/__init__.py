@@ -1,1 +1,1 @@
-# Package marker for Column Pruning Agent
+# Column Pruning Agent package
