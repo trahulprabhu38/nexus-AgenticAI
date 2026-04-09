@@ -46,3 +46,19 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: intent-agent
+  labels:
+    app: intent-agent
+spec:
+  selector:
+    app: intent-agent
+  ports:
+    - port: 8001
+      targetPort: 8001
+  type: ClusterIP

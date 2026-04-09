@@ -1,3 +1,6 @@
+# --- NumPy pinned to 1.x: faiss-cpu 1.7.4 was compiled against NumPy 1.x ABI ---
+numpy==1.26.4
+
 # --- Core Retrieval Dependencies ---
 sentence-transformers==2.2.2
 transformers==4.36.2

@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from validator import SQLValidator
 
 
-DB_URI = "postgresql://user:password@localhost:5432/academic_db"  # TODO: update with real credentials
+DB_URI = "postgresql://admin01:aiml1203@185.197.251.236:5432/nexus"  # TODO: update with real credentials
 
 app = FastAPI()
 validator = SQLValidator(DB_URI)

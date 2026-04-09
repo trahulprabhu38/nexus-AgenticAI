@@ -46,3 +46,19 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: table-agent
+  labels:
+    app: table-agent
+spec:
+  selector:
+    app: table-agent
+  ports:
+    - port: 8002
+      targetPort: 8002
+  type: ClusterIP

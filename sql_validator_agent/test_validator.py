@@ -3,7 +3,7 @@ import pytest
 from validator import SQLValidator
 
 
-validator = SQLValidator("postgresql://user:password@localhost:5432/academic_db")  # TODO: update credentials
+validator = SQLValidator("postgresql://admin01:aiml1203@185.197.251.236:5432/nexus")  # TODO: update credentials
 
 
 def test_valid_query():

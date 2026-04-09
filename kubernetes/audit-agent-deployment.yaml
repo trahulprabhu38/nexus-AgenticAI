@@ -46,3 +46,20 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: audit-agent
+  labels:
+    app: audit-agent
+spec:
+  selector:
+    app: audit-agent
+  ports:
+    - port: 8006
+      targetPort: 8006
+  type: ClusterIP

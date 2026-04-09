@@ -206,6 +206,34 @@ services:
         tag: "audit-agent"
 
   # ════════════════════════════════════════════════════════════════════
+  #  AGENT 7: Retriever Agent (port 8007)
+  # ════════════════════════════════════════════════════════════════════
+  retriever-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile.retriever
+    container_name: nexus-retriever-agent
+    environment:
+      <<: *backend-env
+    ports:
+      - "8007:8007"
+    volumes:
+      - retriever-data:/app/sample_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8007/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - nexus-net
+    restart: unless-stopped
+    logging:
+      <<: *json-logging
+      options:
+        tag: "retriever-agent"
+
+  # ════════════════════════════════════════════════════════════════════
   #  ORCHESTRATOR / SYNTHESIS AGENT (port 8000)
   # ════════════════════════════════════════════════════════════════════
   orchestrator:
@@ -223,6 +251,7 @@ services:
       SQL_GENERATOR_URL: http://sql-generator:8004
       SQL_VALIDATOR_URL: http://sql-validator:8005
       AUDIT_AGENT_URL: http://audit-agent:8006
+      RETRIEVER_AGENT_URL: http://retriever-agent:8007
     depends_on:
       postgres:
         condition: service_healthy
@@ -237,6 +266,8 @@ services:
       sql-validator:
         condition: service_healthy
       audit-agent:
+        condition: service_healthy
+      retriever-agent:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -280,6 +311,7 @@ volumes:
   pgdata:
   mongodata:
   audit-data:
+  retriever-data:
 
 networks:
   nexus-net:

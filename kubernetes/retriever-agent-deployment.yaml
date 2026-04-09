@@ -1,0 +1,82 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: retriever-agent
+  labels:
+    app: retriever-agent
+    tier: agent
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: retriever-agent
+  template:
+    metadata:
+      labels:
+        app: retriever-agent
+        tier: agent
+    spec:
+      containers:
+        - name: retriever-agent
+          image: nexus-retriever:latest
+          command: ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8007"]
+          ports:
+            - containerPort: 8007
+          envFrom:
+            - configMapRef:
+                name: nexus-config
+            - secretRef:
+                name: nexus-secrets
+          volumeMounts:
+            - name: retriever-data
+              mountPath: /app/sample_data
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8007
+            initialDelaySeconds: 15
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8007
+            initialDelaySeconds: 25
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: "512Mi"
+              cpu: "300m"
+            limits:
+              memory: "1Gi"
+              cpu: "750m"
+      volumes:
+        - name: retriever-data
+          persistentVolumeClaim:
+            claimName: retriever-data-pvc
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: retriever-data-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 2Gi
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: retriever-agent
+  labels:
+    app: retriever-agent
+spec:
+  selector:
+    app: retriever-agent
+  ports:
+    - port: 8007
+      targetPort: 8007
+  type: ClusterIP

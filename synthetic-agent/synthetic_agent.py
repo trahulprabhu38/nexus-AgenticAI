@@ -22,6 +22,7 @@ COLUMN_PRUNING_URL = os.getenv("COLUMN_PRUNING_URL", "http://column-pruning:8003
 SQL_GENERATOR_URL = os.getenv("SQL_GENERATOR_URL", "http://sql-generator:8004")
 SQL_VALIDATOR_URL = os.getenv("SQL_VALIDATOR_URL", "http://sql-validator:8005")
 AUDIT_AGENT_URL = os.getenv("AUDIT_AGENT_URL", "http://audit-agent:8006")
+RETRIEVER_AGENT_URL = os.getenv("RETRIEVER_AGENT_URL", "http://retriever-agent:8007")
 
 DB_URL = os.getenv("AIML_RESULTS_DATABASE_URL")
 HOST_EMAIL = os.getenv("HOST_EMAIL", "admin@nexus.ai")
@@ -118,6 +119,23 @@ class SyntheticAgent:
         except Exception as e:
             logger.warning("Audit agent call failed: %s", e)
             return {"passed": True, "reasoning": f"Audit unavailable: {e}"}
+
+    async def _call_retriever(self, query: str, persona: str, sql: str = None, table_candidates: list = None, column_whitelist: list = None) -> dict:
+        try:
+            r = await self.http.post(f"{RETRIEVER_AGENT_URL}/retrieve", json={
+                "query": query,
+                "persona": persona,
+                "sql": sql,
+                "table_candidates": table_candidates or [],
+                "column_whitelist": column_whitelist or [],
+                "top_k_semantic": 5,
+                "top_k_total": 10,
+            })
+            r.raise_for_status()
+            return r.json()
+        except Exception as e:
+            logger.warning("Retriever agent call failed: %s", e)
+            return {"results": [], "error": str(e)}
 
     async def _record_metrics(self, session_id, duration, outcomes, audit_passed):
         try:
@@ -222,6 +240,27 @@ class SyntheticAgent:
             except Exception:
                 pass
 
+        # 4b. Retriever — enrich context with semantically retrieved chunks
+        retriever_context = ""
+        if not is_conversational:
+            retriever_result = await self._call_retriever(
+                query=text,
+                persona=persona,
+                sql=sql_query or None,
+                table_candidates=[t.get("table_id") for t in schema_tables],
+                column_whitelist=kept_cols,
+            )
+            retrieved = retriever_result.get("results", [])
+            if retrieved:
+                snippets = [r.get("text") or r.get("content") or str(r) for r in retrieved[:5]]
+                retriever_context = "\nRetrieved Context:\n" + "\n".join(f"- {s}" for s in snippets)
+                reasoning_parts.append(f"Retriever: {len(retrieved)} chunks")
+                pipeline_steps.append({"agent": "Retriever Agent", "status": "done", "detail": f"{len(retrieved)} chunks"})
+            else:
+                pipeline_steps.append({"agent": "Retriever Agent", "status": "skipped", "detail": "no results"})
+        else:
+            pipeline_steps.append({"agent": "Retriever Agent", "status": "skipped"})
+
         # 5. SQL Validation & Execution
         if sql_query:
             # Re-anchor SQL with identity if found
@@ -315,6 +354,7 @@ Respond naturally and warmly, like a helpful college assistant would. If they gr
 User Query: "{text}"
 Database Results:
 {final_context if final_context.strip() else "(No matching records found in the database.)"}
+{retriever_context}
 
 RESPONSE STYLE:
 - Be warm and helpful, like a knowledgeable academic advisor. Not robotic, not overly formal.
@@ -371,6 +411,7 @@ RESPONSE STYLE:
             "SQL_Generator": bool(sql_query),
             "SQL_Validator": "validated" in reasoning,
             "Audit_Agent": audit_passed,
+            "Retriever_Agent": "Retriever" in reasoning,
         }
         await self._record_metrics(None, duration, outcomes, audit_passed)
 

@@ -49,3 +49,19 @@ spec:
         - name: mongodata
           persistentVolumeClaim:
             claimName: mongodb-pvc
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: mongodb
+  labels:
+    app: mongodb
+spec:
+  selector:
+    app: mongodb
+  ports:
+    - port: 27017
+      targetPort: 27017
+  type: ClusterIP

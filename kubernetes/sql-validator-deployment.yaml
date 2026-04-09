@@ -46,3 +46,19 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: sql-validator
+  labels:
+    app: sql-validator
+spec:
+  selector:
+    app: sql-validator
+  ports:
+    - port: 8005
+      targetPort: 8005
+  type: ClusterIP

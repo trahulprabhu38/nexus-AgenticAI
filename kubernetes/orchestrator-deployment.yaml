@@ -60,3 +60,20 @@ spec:
             limits:
               memory: "1Gi"
               cpu: "1000m"
+
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orchestrator
+  labels:
+    app: orchestrator
+spec:
+  selector:
+    app: orchestrator
+  ports:
+    - port: 8000
+      targetPort: 8000
+  type: ClusterIP
+

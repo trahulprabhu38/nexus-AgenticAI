@@ -26,6 +26,7 @@ COLUMN_PRUNING_URL = os.getenv("COLUMN_PRUNING_URL", "http://column-pruning:8003
 SQL_GENERATOR_URL = os.getenv("SQL_GENERATOR_URL", "http://sql-generator:8004")
 SQL_VALIDATOR_URL = os.getenv("SQL_VALIDATOR_URL", "http://sql-validator:8005")
 AUDIT_AGENT_URL = os.getenv("AUDIT_AGENT_URL", "http://audit-agent:8006")
+RETRIEVER_AGENT_URL = os.getenv("RETRIEVER_AGENT_URL", "http://retriever-agent:8007")
 
 HOST_EMAIL = os.getenv("HOST_EMAIL", "admin@nexus.ai")
 HOST_PASSWORD = os.getenv("HOST_PASSWORD", "Admin@123")
@@ -60,6 +61,7 @@ frontend_agents = [
     {"name": "SQL_Generator", "enabled": True},
     {"name": "SQL_Validator", "enabled": True},
     {"name": "Audit_Agent", "enabled": True},
+    {"name": "Retriever_Agent", "enabled": True},
 ]
 
 
@@ -75,6 +77,7 @@ async def health():
             ("sql_generator", SQL_GENERATOR_URL),
             ("sql_validator", SQL_VALIDATOR_URL),
             ("audit_agent", AUDIT_AGENT_URL),
+            ("retriever_agent", RETRIEVER_AGENT_URL),
         ]:
             try:
                 r = await client.get(f"{url}/health")

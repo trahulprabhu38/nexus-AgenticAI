@@ -46,3 +46,19 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
+
+--- 
+apiVersion: v1
+kind: Service
+metadata:
+  name: column-pruning
+  labels:
+    app: column-pruning
+spec:
+  selector:
+    app: column-pruning
+  ports:
+    - port: 8003
+      targetPort: 8003
+  type: ClusterIP
+
