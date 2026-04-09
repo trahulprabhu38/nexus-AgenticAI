@@ -1,0 +1,20 @@
+[
+  {
+    "query_id": "q1",
+    "query": "Syllabus of Algorithms S7",
+    "relevant_doc_ids": ["syllabus_cs_s7"],
+    "relevant_sql_rows": []
+  },
+  {
+    "query_id": "q2",
+    "query": "Show my semester 7 marks pending re-evaluation",
+    "relevant_doc_ids": [],
+    "relevant_sql_rows": [{"student_id":102, "semester":7}]
+  },
+  {
+    "query_id": "q3",
+    "query": "When does semester start?",
+    "relevant_doc_ids": ["timetable_cs_s7"],
+    "relevant_sql_rows": []
+  }
+]
