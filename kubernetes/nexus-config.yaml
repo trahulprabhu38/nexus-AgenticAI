@@ -3,8 +3,7 @@ kind: ConfigMap
 metadata:
   name: nexus-config
 data:
-  AIML_RESULTS_DATABASE_URL: "postgresql://nexus:nexus_pass@postgres:5432/academic_db"    
-  MONGO_URL: "mongodb://nexus:nexus_pass@mongodb:27017/nexus_auth?authSource=admin"
+  AIML_RESULTS_DATABASE_URL: "postgresql://nexus:nexus_pass@postgres:5432/academic_db"
   HOST_EMAIL: "admin@nexus.ai"
   LOG_LEVEL: "INFO"
   PYTHONPATH: "/app"

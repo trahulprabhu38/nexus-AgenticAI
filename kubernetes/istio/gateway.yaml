@@ -14,7 +14,7 @@ spec:
       hosts:
         - "nexus.infradaily.dev"
       tls:
-        httpsRedirect: true   # redirect all HTTP → HTTPS
+        httpsRedirect: false   # redirect all HTTP → HTTPS
     - port:
         number: 443
         name: https
@@ -24,3 +24,4 @@ spec:
         credentialName: nexus-tls   # kubectl create secret tls nexus-tls --cert=... --key=...
       hosts:
         - "nexus.infradaily.dev"
+

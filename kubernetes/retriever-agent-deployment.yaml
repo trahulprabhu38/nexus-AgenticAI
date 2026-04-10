@@ -62,6 +62,7 @@ kind: PersistentVolumeClaim
 metadata:
   name: retriever-data-pvc
 spec:
+  storageClassName: local-path
   accessModes:
     - ReadWriteOnce
   resources:

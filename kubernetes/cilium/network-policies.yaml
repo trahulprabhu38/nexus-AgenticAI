@@ -1,113 +1,137 @@
----
-# Allow Istio ingress gateway → frontend (port 80)
+# =========================
+# FRONTEND INGRESS (ISTIO)
+# =========================
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: allow-ingress-to-frontend
+  name: frontend-ingress
   namespace: default
 spec:
   endpointSelector:
     matchLabels:
-      app: frontend
+      k8s:app: frontend
   ingress:
+    # Allow Istio ingress gateway
     - fromEndpoints:
         - matchLabels:
-            app: istio-ingressgateway
+            k8s:istio: ingressgateway
+            k8s:io.kubernetes.pod.namespace: istio-system
       toPorts:
         - ports:
             - port: "80"
               protocol: TCP
-    # Allow Istio sidecar health checks and mTLS
+
+    # Allow Istio sidecar health + metrics
     - fromEndpoints:
         - matchLabels:
-            app: istio-pilot
+            k8s:io.kubernetes.pod.namespace: istio-system
       toPorts:
         - ports:
+            - port: "15021"
+              protocol: TCP
             - port: "15090"
               protocol: TCP
 
+    # Allow same namespace (important for stability)
+    - fromEndpoints:
+        - matchLabels:
+            k8s:io.kubernetes.pod.namespace: default
+
+
 ---
-# Allow frontend → orchestrator (nginx /api proxy)
+# =========================
+# FRONTEND → ORCHESTRATOR
+# =========================
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: allow-frontend-to-orchestrator
+  name: frontend-to-orchestrator
   namespace: default
 spec:
   endpointSelector:
     matchLabels:
-      app: orchestrator
+      k8s:app: orchestrator
   ingress:
     - fromEndpoints:
         - matchLabels:
-            app: frontend
+            k8s:app: frontend
       toPorts:
         - ports:
             - port: "8000"
               protocol: TCP
 
+
 ---
-# Orchestrator → all pipeline agents
+# =========================
+# ORCHESTRATOR → AGENTS
+# =========================
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: allow-orchestrator-to-agents
+  name: orchestrator-egress
   namespace: default
 spec:
   endpointSelector:
     matchLabels:
-      app: orchestrator
+      k8s:app: orchestrator
   egress:
     - toEndpoints:
         - matchLabels:
-            app: intent-agent
+            k8s:app: intent-agent
       toPorts:
         - ports:
             - port: "8001"
               protocol: TCP
+
     - toEndpoints:
         - matchLabels:
-            app: table-agent
+            k8s:app: table-agent
       toPorts:
         - ports:
             - port: "8002"
               protocol: TCP
+
     - toEndpoints:
         - matchLabels:
-            app: column-pruning
+            k8s:app: column-pruning
       toPorts:
         - ports:
             - port: "8003"
               protocol: TCP
+
     - toEndpoints:
         - matchLabels:
-            app: sql-generator
+            k8s:app: sql-generator
       toPorts:
         - ports:
             - port: "8004"
               protocol: TCP
+
     - toEndpoints:
         - matchLabels:
-            app: sql-validator
+            k8s:app: sql-validator
       toPorts:
         - ports:
             - port: "8005"
               protocol: TCP
+
     - toEndpoints:
         - matchLabels:
-            app: audit-agent
+            k8s:app: audit-agent
       toPorts:
         - ports:
             - port: "8006"
               protocol: TCP
+
     - toEndpoints:
         - matchLabels:
-            app: retriever-agent
+            k8s:app: retriever-agent
       toPorts:
         - ports:
             - port: "8007"
               protocol: TCP
-    # Allow DNS resolution
+
+    # DNS
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: kube-system
@@ -118,263 +142,90 @@ spec:
             - port: "53"
               protocol: TCP
 
----
-# Allow ingress on each agent — only from orchestrator
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: allow-ingress-to-intent-agent
-  namespace: default
-spec:
-  endpointSelector:
-    matchLabels:
-      app: intent-agent
-  ingress:
-    - fromEndpoints:
-        - matchLabels:
-            app: orchestrator
 
 ---
+# =========================
+# AGENTS INGRESS (ONLY ORCHESTRATOR)
+# =========================
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: allow-ingress-to-table-agent
+  name: agents-ingress
   namespace: default
 spec:
   endpointSelector:
-    matchLabels:
-      app: table-agent
+    matchExpressions:
+      - key: k8s:app
+        operator: In
+        values:
+          - intent-agent
+          - table-agent
+          - column-pruning
+          - sql-generator
+          - sql-validator
+          - audit-agent
+          - retriever-agent
   ingress:
     - fromEndpoints:
         - matchLabels:
-            app: orchestrator
+            k8s:app: orchestrator
+
 
 ---
+# =========================
+# POSTGRES ACCESS
+# =========================
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: allow-ingress-to-column-pruning
+  name: postgres-ingress
   namespace: default
 spec:
   endpointSelector:
     matchLabels:
-      app: column-pruning
+      k8s:app: postgres
   ingress:
     - fromEndpoints:
         - matchLabels:
-            app: orchestrator
-
----
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: allow-ingress-to-sql-generator
-  namespace: default
-spec:
-  endpointSelector:
-    matchLabels:
-      app: sql-generator
-  ingress:
-    - fromEndpoints:
+            k8s:app: orchestrator
         - matchLabels:
-            app: orchestrator
-
----
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: allow-ingress-to-sql-validator
-  namespace: default
-spec:
-  endpointSelector:
-    matchLabels:
-      app: sql-validator
-  ingress:
-    - fromEndpoints:
+            k8s:app: table-agent
         - matchLabels:
-            app: orchestrator
-
----
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: allow-ingress-to-retriever-agent
-  namespace: default
-spec:
-  endpointSelector:
-    matchLabels:
-      app: retriever-agent
-  ingress:
-    - fromEndpoints:
+            k8s:app: column-pruning
         - matchLabels:
-            app: orchestrator
-
----
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: allow-ingress-to-audit-agent
-  namespace: default
-spec:
-  endpointSelector:
-    matchLabels:
-      app: audit-agent
-  ingress:
-    - fromEndpoints:
-        - matchLabels:
-            app: orchestrator
-
----
-# table-agent, column-pruning, sql-validator → postgres
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: allow-agents-to-postgres
-  namespace: default
-spec:
-  endpointSelector:
-    matchLabels:
-      app: postgres
-  ingress:
-    - fromEndpoints:
-        - matchLabels:
-            app: table-agent
-      toPorts:
-        - ports:
-            - port: "5432"
-              protocol: TCP
-    - fromEndpoints:
-        - matchLabels:
-            app: column-pruning
-      toPorts:
-        - ports:
-            - port: "5432"
-              protocol: TCP
-    - fromEndpoints:
-        - matchLabels:
-            app: sql-validator
-      toPorts:
-        - ports:
-            - port: "5432"
-              protocol: TCP
-    - fromEndpoints:
-        - matchLabels:
-            app: orchestrator
+            k8s:app: sql-validator
       toPorts:
         - ports:
             - port: "5432"
               protocol: TCP
 
----
-# retriever-agent, audit-agent → mongodb
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: allow-agents-to-mongodb
-  namespace: default
-spec:
-  endpointSelector:
-    matchLabels:
-      app: mongodb
-  ingress:
-    - fromEndpoints:
-        - matchLabels:
-            app: retriever-agent
-      toPorts:
-        - ports:
-            - port: "27017"
-              protocol: TCP
-    - fromEndpoints:
-        - matchLabels:
-            app: audit-agent
-      toPorts:
-        - ports:
-            - port: "27017"
-              protocol: TCP
-    - fromEndpoints:
-        - matchLabels:
-            app: orchestrator
-      toPorts:
-        - ports:
-            - port: "27017"
-              protocol: TCP
 
 ---
-# Agent egress to postgres
+# =========================
+# MONGODB ATLAS EGRESS
+# =========================
+# No in-cluster MongoDB — retriever-agent and audit-agent connect to Atlas over TLS
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: allow-db-egress-agents
+  name: mongodb-atlas-egress
   namespace: default
 spec:
   endpointSelector:
-    matchLabels:
-      nexus-role: db-client   # label added to: table-agent, column-pruning, sql-validator
-  egress:
-    - toEndpoints:
-        - matchLabels:
-            app: postgres
-      toPorts:
-        - ports:
-            - port: "5432"
-              protocol: TCP
-    - toEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: kube-system
-      toPorts:
-        - ports:
-            - port: "53"
-              protocol: UDP
-            - port: "53"
-              protocol: TCP
-
----
-# Agent egress to mongodb
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: allow-mongo-egress-agents
-  namespace: default
-spec:
-  endpointSelector:
-    matchLabels:
-      nexus-role: mongo-client   # label added to: retriever-agent, audit-agent
-  egress:
-    - toEndpoints:
-        - matchLabels:
-            app: mongodb
-      toPorts:
-        - ports:
-            - port: "27017"
-              protocol: TCP
-    - toEndpoints:
-        - matchLabels:
-            k8s:io.kubernetes.pod.namespace: kube-system
-      toPorts:
-        - ports:
-            - port: "53"
-              protocol: UDP
-            - port: "53"
-              protocol: TCP
-
----
-# sql-generator egress — needs to reach external LLM API (e.g. OpenAI/Gemini) over HTTPS
-apiVersion: cilium.io/v2
-kind: CiliumNetworkPolicy
-metadata:
-  name: allow-sql-generator-external-egress
-  namespace: default
-spec:
-  endpointSelector:
-    matchLabels:
-      app: sql-generator
+    matchExpressions:
+      - key: k8s:app
+        operator: In
+        values:
+          - retriever-agent
+          - audit-agent
   egress:
     - toFQDNs:
-        - matchPattern: "*.openai.com"
-        - matchPattern: "*.googleapis.com"
-        - matchPattern: "*.anthropic.com"
+        - matchPattern: "*.mongodb.net"
+        - matchPattern: "*.3qfvi7m.mongodb.net"
       toPorts:
         - ports:
+            - port: "27017"
+              protocol: TCP
             - port: "443"
               protocol: TCP
     - toEndpoints:
@@ -387,17 +238,24 @@ spec:
             - port: "53"
               protocol: TCP
 
+
 ---
-# intent-agent egress — may call external LLM for classification
+# =========================
+# EXTERNAL LLM ACCESS
+# =========================
 apiVersion: cilium.io/v2
 kind: CiliumNetworkPolicy
 metadata:
-  name: allow-intent-agent-external-egress
+  name: llm-egress
   namespace: default
 spec:
   endpointSelector:
-    matchLabels:
-      app: intent-agent
+    matchExpressions:
+      - key: k8s:app
+        operator: In
+        values:
+          - sql-generator
+          - intent-agent
   egress:
     - toFQDNs:
         - matchPattern: "*.openai.com"
@@ -407,6 +265,7 @@ spec:
         - ports:
             - port: "443"
               protocol: TCP
+
     - toEndpoints:
         - matchLabels:
             k8s:io.kubernetes.pod.namespace: kube-system
@@ -416,3 +275,6 @@ spec:
               protocol: UDP
             - port: "53"
               protocol: TCP
+
+
+
