@@ -1,0 +1,195 @@
+---
+# External ingress: all traffic hits frontend; /api/* is proxied by nginx to orchestrator internally
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: nexus-frontend
+  namespace: default
+spec:
+  hosts:
+    - "nexus.infradaily.dev"
+  gateways:
+    - nexus-gateway
+  http:
+    - match:
+        - uri:
+            prefix: /
+      route:
+        - destination:
+            host: frontend
+            port:
+              number: 80
+      timeout: 60s
+      retries:
+        attempts: 2
+        perTryTimeout: 30s
+        retryOn: gateway-error,connect-failure,retriable-4xx
+
+---
+# Orchestrator — internal mesh only (called by frontend nginx /api proxy)
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: orchestrator
+  namespace: default
+spec:
+  hosts:
+    - orchestrator
+  http:
+    - route:
+        - destination:
+            host: orchestrator
+            port:
+              number: 8000
+      timeout: 120s
+      retries:
+        attempts: 3
+        perTryTimeout: 40s
+        retryOn: 5xx,reset,connect-failure
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: intent-agent
+  namespace: default
+spec:
+  hosts:
+    - intent-agent
+  http:
+    - route:
+        - destination:
+            host: intent-agent
+            port:
+              number: 8001
+      timeout: 30s
+      retries:
+        attempts: 3
+        perTryTimeout: 10s
+        retryOn: 5xx,reset,connect-failure
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: table-agent
+  namespace: default
+spec:
+  hosts:
+    - table-agent
+  http:
+    - route:
+        - destination:
+            host: table-agent
+            port:
+              number: 8002
+      timeout: 30s
+      retries:
+        attempts: 3
+        perTryTimeout: 10s
+        retryOn: 5xx,reset,connect-failure
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: column-pruning
+  namespace: default
+spec:
+  hosts:
+    - column-pruning
+  http:
+    - route:
+        - destination:
+            host: column-pruning
+            port:
+              number: 8003
+      timeout: 30s
+      retries:
+        attempts: 3
+        perTryTimeout: 10s
+        retryOn: 5xx,reset,connect-failure
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: sql-generator
+  namespace: default
+spec:
+  hosts:
+    - sql-generator
+  http:
+    - route:
+        - destination:
+            host: sql-generator
+            port:
+              number: 8004
+      timeout: 60s
+      retries:
+        attempts: 2
+        perTryTimeout: 30s
+        retryOn: 5xx,reset,connect-failure
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: sql-validator
+  namespace: default
+spec:
+  hosts:
+    - sql-validator
+  http:
+    - route:
+        - destination:
+            host: sql-validator
+            port:
+              number: 8005
+      timeout: 30s
+      retries:
+        attempts: 3
+        perTryTimeout: 10s
+        retryOn: 5xx,reset,connect-failure
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: retriever-agent
+  namespace: default
+spec:
+  hosts:
+    - retriever-agent
+  http:
+    - route:
+        - destination:
+            host: retriever-agent
+            port:
+              number: 8007
+      timeout: 30s
+      retries:
+        attempts: 3
+        perTryTimeout: 10s
+        retryOn: 5xx,reset,connect-failure
+
+---
+apiVersion: networking.istio.io/v1beta1
+kind: VirtualService
+metadata:
+  name: audit-agent
+  namespace: default
+spec:
+  hosts:
+    - audit-agent
+  http:
+    - route:
+        - destination:
+            host: audit-agent
+            port:
+              number: 8006
+      timeout: 30s
+      retries:
+        attempts: 2
+        perTryTimeout: 15s
+        retryOn: 5xx,reset,connect-failure

@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: nexus-frontend:latest
+          image: trahulprabhu38/nexus-frontend:latest
           ports:
             - containerPort: 80
           readinessProbe:
@@ -41,7 +41,7 @@ spec:
               memory: "128Mi"
               cpu: "200m"
 
---- 
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -54,4 +54,5 @@ spec:
   ports:
     - port: 80
       targetPort: 80
-  type: ClusterIP
+      nodePort: 30050
+  type: NodePort

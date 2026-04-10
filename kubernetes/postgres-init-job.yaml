@@ -1,64 +1,41 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: postgres-schema-init
-  labels:
-    app: postgres
-    component: schema-init
+  name: postgres-init
 spec:
-  backoffLimit: 3
   ttlSecondsAfterFinished: 300
   template:
-    metadata:
-      labels:
-        app: postgres
-        component: schema-init
     spec:
       restartPolicy: OnFailure
-      initContainers:
-        # Wait for Postgres to be ready before running the schema
-        - name: wait-for-postgres
-          image: postgres:16-alpine
-          command:
-            - sh
-            - -c
-            - |
-              echo "Waiting for Postgres to accept connections..."
-              until pg_isready -h postgres -U nexus -d academic_db; do
-                echo "Postgres not ready yet, retrying in 3s..."
-                sleep 3
-              done
-              echo "Postgres is ready."
-          env:
-            - name: PGPASSWORD
-              valueFrom:
-                secretKeyRef:
-                  name: nexus-secrets
-                  key: POSTGRES_PASSWORD
       containers:
-        # Uses the backend image which already has the SQL file at /app/db/
-        - name: schema-loader
-          image: nexus-backend:latest
+        - name: postgres-init
+          image: trahulprabhu38/nexus-db_init:latest
           command:
             - sh
             - -c
             - |
-              echo "Checking if schema already exists..."
-              TABLE_COUNT=$(psql -h postgres -U nexus -d academic_db -tAc \
-                "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'aiml_academic';")
-
-              if [ "$TABLE_COUNT" -gt "0" ]; then
-                echo "Schema aiml_academic already has $TABLE_COUNT tables — skipping init."
-                exit 0
-              fi
-
-              SQL_FILE="/app/db/results_aiml_normalized_postgres.sql"
-              echo "Loading schema from $SQL_FILE ($(wc -c < $SQL_FILE) bytes)..."
-              psql -h postgres -U nexus -d academic_db -f "$SQL_FILE"
-              echo "Schema loaded successfully."
+              echo "Waiting for postgres to be ready..."
+              until pg_isready -h postgres -U nexus -d academic_db; do
+                sleep 2
+              done
+              echo "Loading schema and data..."
+              PGPASSWORD=$POSTGRES_PASSWORD psql -h postgres -U $POSTGRES_USER -d academic_db -f /schema.sql
+              echo "Done."
           env:
-            - name: PGPASSWORD
+            - name: POSTGRES_USER
+              valueFrom:
+                secretKeyRef:
+                  name: nexus-secrets
+                  key: POSTGRES_USER
+            - name: POSTGRES_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: nexus-secrets
                   key: POSTGRES_PASSWORD
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "256Mi"
+              cpu: "500m"

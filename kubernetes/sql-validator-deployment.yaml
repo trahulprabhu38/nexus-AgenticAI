@@ -18,8 +18,7 @@ spec:
     spec:
       containers:
         - name: sql-validator
-          image: nexus-backend:latest
-          command: ["uvicorn", "sql_validator_agent.serve:app", "--host", "0.0.0.0", "--port", "8005"]
+          image: trahulprabhu38/nexus-sql_validator_agent:latest
           ports:
             - containerPort: 8005
           envFrom:
@@ -31,13 +30,13 @@ spec:
             httpGet:
               path: /health
               port: 8005
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 15
           livenessProbe:
             httpGet:
               path: /health
               port: 8005
-            initialDelaySeconds: 20
+            initialDelaySeconds: 30
             periodSeconds: 30
           resources:
             requests:
@@ -48,7 +47,6 @@ spec:
               cpu: "500m"
 
 ---
-
 apiVersion: v1
 kind: Service
 metadata:

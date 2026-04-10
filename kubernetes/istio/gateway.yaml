@@ -1,0 +1,26 @@
+apiVersion: networking.istio.io/v1beta1
+kind: Gateway
+metadata:
+  name: nexus-gateway
+  namespace: default
+spec:
+  selector:
+    istio: ingressgateway
+  servers:
+    - port:
+        number: 80
+        name: http
+        protocol: HTTP
+      hosts:
+        - "nexus.infradaily.dev"
+      tls:
+        httpsRedirect: true   # redirect all HTTP → HTTPS
+    - port:
+        number: 443
+        name: https
+        protocol: HTTPS
+      tls:
+        mode: SIMPLE
+        credentialName: nexus-tls   # kubectl create secret tls nexus-tls --cert=... --key=...
+      hosts:
+        - "nexus.infradaily.dev"

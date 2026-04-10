@@ -18,9 +18,7 @@ spec:
     spec:
       containers:
         - name: orchestrator
-          image: nexus-backend:latest
-          command: ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-          workingDir: /app/synthetic-agent
+          image: trahulprabhu38/nexus-synthetic-agent:latest
           ports:
             - containerPort: 8000
           envFrom:
@@ -41,18 +39,24 @@ spec:
               value: http://sql-validator:8005
             - name: AUDIT_AGENT_URL
               value: http://audit-agent:8006
+            - name: RETRIEVER_AGENT_URL
+              value: http://retriever-agent:8007
           readinessProbe:
             httpGet:
               path: /health
               port: 8000
             initialDelaySeconds: 20
             periodSeconds: 15
+            timeoutSeconds: 40
+            failureThreshold: 3
           livenessProbe:
             httpGet:
               path: /health
               port: 8000
             initialDelaySeconds: 30
             periodSeconds: 30
+            timeoutSeconds: 40
+            failureThreshold: 3
           resources:
             requests:
               memory: "512Mi"
@@ -60,7 +64,6 @@ spec:
             limits:
               memory: "1Gi"
               cpu: "1000m"
-
 
 ---
 apiVersion: v1
@@ -76,4 +79,3 @@ spec:
     - port: 8000
       targetPort: 8000
   type: ClusterIP
-

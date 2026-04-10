@@ -32,7 +32,8 @@ class SyntheticAgent:
     def __init__(self):
         self.api_key = os.getenv("NVIDIA_API_KEY") or os.getenv("OPENAI_API_KEY") or ""
 
-        kwargs = {"api_key": self.api_key, "timeout": 30.0}
+        # LLM inference (especially NVIDIA llama) can take 60-120s under load.
+        kwargs = {"api_key": self.api_key, "timeout": 120.0}
         if self.api_key.startswith("nvapi-"):
             kwargs["base_url"] = "https://integrate.api.nvidia.com/v1"
             self.model = "meta/llama-3.1-8b-instruct"
@@ -40,7 +41,8 @@ class SyntheticAgent:
             self.model = "gpt-3.5-turbo"
 
         self.client = AsyncOpenAI(**kwargs)
-        self.http = httpx.AsyncClient(timeout=30.0)
+        # Agent microservice calls — 90s allows for slow startup / cold pods.
+        self.http = httpx.AsyncClient(timeout=90.0)
         logger.info("SyntheticAgent initialized — HTTP orchestration mode")
 
     # ── HTTP helpers to call each agent service ────────────────────────
@@ -198,22 +200,45 @@ class SyntheticAgent:
                 reasoning_parts.append(f"Pruned to {len(kept_cols)} cols")
                 pipeline_steps.append({"agent": "Column Pruning", "status": "done", "detail": f"{len(kept_cols)} columns kept"})
 
-                # 3. SQL Generation — pass actual DB table names from aiml_academic schema
-                db_tables = ["students", "student_semester_results", "student_subject_results", "semesters", "subjects", "session_subjects", "result_sessions"]
-                # Extract batch/admission year hint for SQL generator
+                # 3. SQL Generation
+                # For aggregate/batch queries, build SQL directly from inferred filters
+                # instead of delegating to the LLM which doesn't know the schema.
                 batch_year_match = re.search(r'\b(20\d{2})\b', text)
-                batch_hint = ""
-                if is_aggregate_query and batch_year_match:
-                    batch_hint = f"\nIMPORTANT: This is a BATCH/AGGREGATE query for admission_year={batch_year_match.group(1)}. Fetch ALL semesters for ALL students in that batch. Use: WHERE s.admission_year = {batch_year_match.group(1)} — do NOT add any semester filter."
-                sql_query = await self._call_sql_gen(
-                    f"{text}\nContext hint: {context_str}{batch_hint}",
-                    intent=intent, tables=db_tables, columns=kept_cols,
-                )
-                if sql_query:
-                    reasoning_parts.append("SQL generated")
-                    pipeline_steps.append({"agent": "SQL Generator", "status": "done", "detail": "query generated"})
+                sem_match_agg = re.search(r'\b(?:sem(?:ester)?\s*(\d)|(\d)\s*(?:st|nd|rd|th)?\s*sem(?:ester)?)\b', text, re.IGNORECASE)
+                inferred_sem = int(sem_match_agg.group(1) or sem_match_agg.group(2)) if sem_match_agg else None
+                inferred_year = int(batch_year_match.group(1)) if batch_year_match else None
+
+                if is_aggregate_query and (inferred_year or inferred_sem):
+                    filters = []
+                    if inferred_year:
+                        filters.append(f"s.admission_year = {inferred_year}")
+                    if inferred_sem:
+                        filters.append(f"rs.semester_no = {inferred_sem}")
+                    where_clause = " AND ".join(filters)
+                    wants_top = bool(re.search(r'\b(highest|top|best|topper|rank|max|maximum)\b', text, re.IGNORECASE))
+                    order_limit = "ORDER BY r.sgpa DESC NULLS LAST" + (" LIMIT 10" if wants_top else "")
+                    sql_query = (
+                        f"SELECT s.student_usn, s.student_name, s.admission_year, "
+                        f"rs.semester_no, r.sgpa, r.percentage "
+                        f"FROM aiml_academic.students s "
+                        f"JOIN aiml_academic.student_semester_results r ON s.student_usn = r.student_usn "
+                        f"JOIN aiml_academic.result_sessions rs ON r.session_id = rs.session_id "
+                        f"WHERE {where_clause} "
+                        f"{order_limit}"
+                    )
+                    reasoning_parts.append(f"SQL built directly (batch y={inferred_year} s={inferred_sem})")
+                    pipeline_steps.append({"agent": "SQL Generator", "status": "done", "detail": "direct batch SQL"})
                 else:
-                    pipeline_steps.append({"agent": "SQL Generator", "status": "failed", "detail": "no SQL produced"})
+                    db_tables = ["aiml_academic.students", "aiml_academic.student_semester_results", "aiml_academic.student_subject_results", "aiml_academic.semesters", "aiml_academic.subjects", "aiml_academic.session_subjects", "aiml_academic.result_sessions"]
+                    sql_query = await self._call_sql_gen(
+                        f"{text}\nContext hint: {context_str}",
+                        intent=intent, tables=db_tables, columns=kept_cols,
+                    )
+                    if sql_query:
+                        reasoning_parts.append("SQL generated")
+                        pipeline_steps.append({"agent": "SQL Generator", "status": "done", "detail": "query generated"})
+                    else:
+                        pipeline_steps.append({"agent": "SQL Generator", "status": "failed", "detail": "no SQL produced"})
         else:
             reasoning_parts.append("Fast-path: conversational")
             pipeline_steps.append({"agent": "Column Pruning", "status": "skipped"})
@@ -224,7 +249,7 @@ class SyntheticAgent:
         if not is_conversational and DB_URL:
             try:
                 from sqlalchemy import create_engine, text as sqla_text
-                engine = create_engine(DB_URL)
+                engine = create_engine(DB_URL, connect_args={"connect_timeout": 5, "options": "-csearch_path=aiml_academic"})
                 with engine.connect() as conn:
                     usn_match = re.search(r"\b1DS\d{2}[A-Z]{2}\d{3}\b", text, re.IGNORECASE)
                     # Extract proper name: strip common query words to isolate the student name
@@ -269,14 +294,24 @@ class SyntheticAgent:
 
         # 5. SQL Validation & Execution
         if sql_query:
-            # Re-anchor SQL with identity if found
+            # Re-anchor SQL with identity if found.
+            # Build the query directly using the confirmed USN — do NOT delegate
+            # this back to the LLM since small models ignore the USN and use the
+            # name with a case-sensitive = which returns 0 rows.
             if master_identity:
-                db_tables = ["students", "student_semester_results", "student_subject_results", "semesters", "subjects", "session_subjects", "result_sessions"]
-                sql_query = await self._call_sql_gen(
-                    f"{text}\nGROUND TRUTH: {master_identity['name']} (USN: {master_identity['usn']}). Use this EXACT USN in the WHERE clause.\nContext: {context_str}",
-                    intent=intent, tables=db_tables, columns=kept_cols,
+                usn = master_identity["usn"]
+                sql_query = (
+                    f"SELECT s.student_usn, s.student_name, s.admission_year, "
+                    f"rs.semester_no, r.sgpa, r.percentage "
+                    f"FROM aiml_academic.students s "
+                    f"LEFT JOIN aiml_academic.student_semester_results r "
+                    f"ON s.student_usn = r.student_usn "
+                    f"LEFT JOIN aiml_academic.result_sessions rs "
+                    f"ON r.session_id = rs.session_id "
+                    f"WHERE s.student_usn = '{usn}' "
+                    f"ORDER BY rs.semester_no"
                 )
-                reasoning_parts.append("SQL re-anchored")
+                reasoning_parts.append("SQL grounded by USN")
 
             is_valid, val_results = await self._call_validate(sql_query)
             if not is_valid:
@@ -307,7 +342,7 @@ class SyntheticAgent:
             if sql_query and DB_URL:
                 try:
                     from sqlalchemy import create_engine, text as sqla_text
-                    engine = create_engine(DB_URL)
+                    engine = create_engine(DB_URL, connect_args={"connect_timeout": 5, "options": "-csearch_path=aiml_academic"})
                     with engine.connect() as conn:
                         try:
                             result = conn.execute(sqla_text(sql_query))
@@ -416,14 +451,20 @@ RESPONSE STYLE:
             final_resp = f"Failed to generate response: {e}"
             logger.error("LLM synthesis failed: %s", e)
 
-        # Anti-hallucination guard: if no data was found for a SPECIFIC student query, don't let the LLM invent answers
-        if not is_conversational and not rows and not master_identity and not is_aggregate_query:
-            # Check if LLM is hallucinating numbers/data despite having no DB results
-            has_hallucinated = bool(re.search(r'\b\d+\.\d+\b', final_resp)) and "not found" not in final_resp.lower() and "no record" not in final_resp.lower() and "couldn't find" not in final_resp.lower()
+        # Anti-hallucination guard: if no DB rows returned, block invented data for ALL query types
+        if not is_conversational and not rows:
+            no_data_phrases = ["not found", "no record", "couldn't find", "could not find", "no data", "no results", "no matching", "unable to find"]
+            lresp = final_resp.lower()
+            already_honest = any(p in lresp for p in no_data_phrases)
+            # Block if LLM invented numbers or student names when we have zero rows
+            has_hallucinated = (
+                bool(re.search(r'\b\d+\.\d+\b', final_resp)) or
+                bool(re.search(r'\|\s*\w', final_resp))  # markdown table with data
+            ) and not already_honest
             if has_hallucinated:
-                search_name = re.sub(r'\b(what|who|is|the|of|for|get|show|find|me|cgpa|sgpa|usn|result|results|semester|wise|tell|about|performance|academic)\b', '', text, flags=re.IGNORECASE).strip()
-                search_name = re.sub(r'\s+', ' ', search_name).strip()
-                final_resp = f"I couldn't find any records for **{search_name}** in our database. Please double-check the name or USN and try again. You can search by full name (e.g., \"Abdur Rahman\") or USN (e.g., \"1DS20AI001\")."
+                search_name = re.sub(r'\b(what|who|is|the|of|for|get|show|find|me|cgpa|sgpa|usn|result|results|semester|wise|tell|about|performance|academic|average|avg|marks|batch|highest|top|best)\b', '', text, flags=re.IGNORECASE).strip()
+                search_name = re.sub(r'\s+', ' ', search_name).strip() or "the requested query"
+                final_resp = f"I couldn't find any matching records for **{search_name}** in our database. Please double-check the details and try again."
                 logger.warning("Hallucination blocked for query: %s", text[:60])
 
         pipeline_steps.append({"agent": "Synthesis", "status": "done", "detail": "conversational" if is_conversational else f"{len(rows)} rows"})

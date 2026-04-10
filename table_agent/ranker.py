@@ -260,7 +260,7 @@ def rank_tables(query: str, top_k: int = 5) -> tuple[list[dict[str, Any]], str |
     pg_url = _database_url()
     if pg_url:
         try:
-            conn = psycopg2.connect(pg_url)
+            conn = psycopg2.connect(pg_url, connect_timeout=5, options="-csearch_path=aiml_academic")
             try:
                 sem_q = _infer_semesters(query)
                 years_q = _infer_years(query)

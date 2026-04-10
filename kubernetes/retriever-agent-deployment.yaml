@@ -18,8 +18,8 @@ spec:
     spec:
       containers:
         - name: retriever-agent
-          image: nexus-retriever:latest
-          command: ["uvicorn", "api:app", "--host", "0.0.0.0", "--port", "8007"]
+          image: trahulprabhu38/nexus-retriever_agent:latest
+          imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8007
           envFrom:
@@ -34,14 +34,16 @@ spec:
             httpGet:
               path: /health
               port: 8007
-            initialDelaySeconds: 15
+            initialDelaySeconds: 90
             periodSeconds: 15
+            failureThreshold: 5
           livenessProbe:
             httpGet:
               path: /health
               port: 8007
-            initialDelaySeconds: 25
+            initialDelaySeconds: 120
             periodSeconds: 30
+            failureThreshold: 5
           resources:
             requests:
               memory: "512Mi"
@@ -53,6 +55,7 @@ spec:
         - name: retriever-data
           persistentVolumeClaim:
             claimName: retriever-data-pvc
+
 ---
 apiVersion: v1
 kind: PersistentVolumeClaim
@@ -66,7 +69,6 @@ spec:
       storage: 2Gi
 
 ---
-
 apiVersion: v1
 kind: Service
 metadata:

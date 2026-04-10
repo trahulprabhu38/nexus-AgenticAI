@@ -18,8 +18,7 @@ spec:
     spec:
       containers:
         - name: column-pruning
-          image: nexus-backend:latest
-          command: ["uvicorn", "column_pruning_agent.serve:app", "--host", "0.0.0.0", "--port", "8003"]
+          image: trahulprabhu38/nexus-column_pruning_agent:latest
           ports:
             - containerPort: 8003
           envFrom:
@@ -31,13 +30,13 @@ spec:
             httpGet:
               path: /health
               port: 8003
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 15
           livenessProbe:
             httpGet:
               path: /health
               port: 8003
-            initialDelaySeconds: 20
+            initialDelaySeconds: 30
             periodSeconds: 30
           resources:
             requests:
@@ -47,7 +46,7 @@ spec:
               memory: "512Mi"
               cpu: "500m"
 
---- 
+---
 apiVersion: v1
 kind: Service
 metadata:
@@ -61,4 +60,3 @@ spec:
     - port: 8003
       targetPort: 8003
   type: ClusterIP
-

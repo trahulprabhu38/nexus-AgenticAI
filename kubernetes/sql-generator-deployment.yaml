@@ -18,8 +18,7 @@ spec:
     spec:
       containers:
         - name: sql-generator
-          image: nexus-backend:latest
-          command: ["uvicorn", "SQL_QUERY_GENERATOR.serve:app", "--host", "0.0.0.0", "--port", "8004"]
+          image: trahulprabhu38/nexus-sql_query_generator:latest
           ports:
             - containerPort: 8004
           envFrom:
@@ -31,13 +30,13 @@ spec:
             httpGet:
               path: /health
               port: 8004
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 15
           livenessProbe:
             httpGet:
               path: /health
               port: 8004
-            initialDelaySeconds: 20
+            initialDelaySeconds: 30
             periodSeconds: 30
           resources:
             requests:
@@ -48,7 +47,6 @@ spec:
               cpu: "500m"
 
 ---
-
 apiVersion: v1
 kind: Service
 metadata:

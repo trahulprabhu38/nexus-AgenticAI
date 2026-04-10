@@ -3,6 +3,7 @@ Nexus Orchestrator — Master API Gateway
 Port: 8000
 Coordinates all agent microservices and serves as the frontend's backend.
 """
+import asyncio
 import os, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv
@@ -67,23 +68,27 @@ frontend_agents = [
 
 @app.get("/health")
 async def health():
-    """Aggregated health check — pings all agent services."""
-    async with httpx.AsyncClient(timeout=5.0) as client:
-        checks = {}
-        for name, url in [
-            ("intent_agent", INTENT_AGENT_URL),
-            ("table_agent", TABLE_AGENT_URL),
-            ("column_pruning", COLUMN_PRUNING_URL),
-            ("sql_generator", SQL_GENERATOR_URL),
-            ("sql_validator", SQL_VALIDATOR_URL),
-            ("audit_agent", AUDIT_AGENT_URL),
-            ("retriever_agent", RETRIEVER_AGENT_URL),
-        ]:
-            try:
+    """Aggregated health check — pings all agent services in parallel."""
+    agents = [
+        ("intent_agent", INTENT_AGENT_URL),
+        ("table_agent", TABLE_AGENT_URL),
+        ("column_pruning", COLUMN_PRUNING_URL),
+        ("sql_generator", SQL_GENERATOR_URL),
+        ("sql_validator", SQL_VALIDATOR_URL),
+        ("audit_agent", AUDIT_AGENT_URL),
+        ("retriever_agent", RETRIEVER_AGENT_URL),
+    ]
+
+    async def ping(name, url):
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
                 r = await client.get(f"{url}/health")
-                checks[name] = r.json().get("status", "unknown")
-            except Exception:
-                checks[name] = "unreachable"
+                return name, r.json().get("status", "unknown")
+        except Exception:
+            return name, "unreachable"
+
+    results = await asyncio.gather(*[ping(name, url) for name, url in agents])
+    checks = dict(results)
 
     all_healthy = all(v == "healthy" for v in checks.values())
     return {

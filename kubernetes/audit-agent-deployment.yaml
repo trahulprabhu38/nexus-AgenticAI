@@ -18,8 +18,7 @@ spec:
     spec:
       containers:
         - name: audit-agent
-          image: nexus-backend:latest
-          command: ["uvicorn", "Audit_agent.serve:app", "--host", "0.0.0.0", "--port", "8006"]
+          image: trahulprabhu38/nexus-audit_agent:latest
           ports:
             - containerPort: 8006
           envFrom:
@@ -31,13 +30,13 @@ spec:
             httpGet:
               path: /health
               port: 8006
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 15
           livenessProbe:
             httpGet:
               path: /health
               port: 8006
-            initialDelaySeconds: 20
+            initialDelaySeconds: 30
             periodSeconds: 30
           resources:
             requests:
@@ -47,9 +46,7 @@ spec:
               memory: "512Mi"
               cpu: "500m"
 
-
 ---
-
 apiVersion: v1
 kind: Service
 metadata:

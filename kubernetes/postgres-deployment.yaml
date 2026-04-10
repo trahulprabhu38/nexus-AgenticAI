@@ -1,3 +1,15 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: postgres-pvc
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,6 +32,8 @@ spec:
           ports:
             - containerPort: 5432
           env:
+            - name: POSTGRES_DB
+              value: academic_db
             - name: POSTGRES_USER
               valueFrom:
                 secretKeyRef:
@@ -30,8 +44,6 @@ spec:
                 secretKeyRef:
                   name: nexus-secrets
                   key: POSTGRES_PASSWORD
-            - name: POSTGRES_DB
-              value: academic_db
           volumeMounts:
             - name: pgdata
               mountPath: /var/lib/postgresql/data
@@ -40,10 +52,19 @@ spec:
               command: ["pg_isready", "-U", "nexus", "-d", "academic_db"]
             initialDelaySeconds: 10
             periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "nexus", "-d", "academic_db"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
           resources:
             requests:
               memory: "256Mi"
-              cpu: "250m"
+              cpu: "200m"
             limits:
               memory: "512Mi"
               cpu: "500m"
@@ -52,9 +73,7 @@ spec:
           persistentVolumeClaim:
             claimName: postgres-pvc
 
-
 ---
-
 apiVersion: v1
 kind: Service
 metadata:

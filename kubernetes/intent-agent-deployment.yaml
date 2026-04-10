@@ -18,8 +18,7 @@ spec:
     spec:
       containers:
         - name: intent-agent
-          image: nexus-backend:latest
-          command: ["uvicorn", "Intent_Agent3.serve:app", "--host", "0.0.0.0", "--port", "8001"]
+          image: trahulprabhu38/nexus-intent_agent3:latest
           ports:
             - containerPort: 8001
           envFrom:
@@ -31,13 +30,13 @@ spec:
             httpGet:
               path: /health
               port: 8001
-            initialDelaySeconds: 10
+            initialDelaySeconds: 15
             periodSeconds: 15
           livenessProbe:
             httpGet:
               path: /health
               port: 8001
-            initialDelaySeconds: 20
+            initialDelaySeconds: 30
             periodSeconds: 30
           resources:
             requests:
@@ -48,7 +47,6 @@ spec:
               cpu: "500m"
 
 ---
-
 apiVersion: v1
 kind: Service
 metadata:

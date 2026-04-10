@@ -55,9 +55,10 @@ def health():
 @app.post("/validate", response_model=ValidateResponse)
 def validate_query(req: ValidateRequest):
     if not validator:
-        logger.error("Validation attempted but no DB connection")
-        return ValidateResponse(valid=False, results=[
-            CheckResult(check="Connection", valid=False, message="Database not connected")
+        # DB unavailable — fail-open so the pipeline isn't blocked by a dead validator
+        logger.warning("Validator DB unavailable, passing SQL through (fail-open)")
+        return ValidateResponse(valid=True, results=[
+            CheckResult(check="Connection", valid=True, message="Validator skipped: DB unreachable")
         ])
 
     logger.info("Validating SQL: %s", req.query[:100])

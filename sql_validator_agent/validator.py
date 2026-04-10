@@ -6,9 +6,9 @@ from sqlalchemy import MetaData, create_engine, inspect, text
 
 class SQLValidator:
     def __init__(self, db_uri: str):
-        self.engine = create_engine(db_uri)
+        self.engine = create_engine(db_uri, connect_args={"connect_timeout": 5})
         self.metadata = MetaData()
-        # Reflect the specific schema populated by our scripts
+        # Reflect schema — uses a short connect_timeout so a dead DB fails fast
         self.metadata.reflect(bind=self.engine, schema='aiml_academic')
         self.inspector = inspect(self.engine)
 
