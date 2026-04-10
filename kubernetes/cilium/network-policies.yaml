@@ -194,6 +194,8 @@ spec:
             k8s:app: column-pruning
         - matchLabels:
             k8s:app: sql-validator
+        - matchLabels:
+            job-name: postgres-init
       toPorts:
         - ports:
             - port: "5432"
@@ -256,11 +258,15 @@ spec:
         values:
           - sql-generator
           - intent-agent
+          - orchestrator
   egress:
     - toFQDNs:
         - matchPattern: "*.openai.com"
         - matchPattern: "*.googleapis.com"
         - matchPattern: "*.anthropic.com"
+        - matchPattern: "integrate.api.nvidia.com"
+        - matchPattern: "api.nvcf.nvidia.com"
+        - matchPattern: "*.nvidia.com"
       toPorts:
         - ports:
             - port: "443"

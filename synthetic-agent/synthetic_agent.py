@@ -40,7 +40,7 @@ class SyntheticAgent:
         else:
             self.model = "gpt-3.5-turbo"
 
-        self.client = AsyncOpenAI(**kwargs)
+        self.client = AsyncOpenAI(**kwargs, max_retries=1)
         # Agent microservice calls — 90s allows for slow startup / cold pods.
         self.http = httpx.AsyncClient(timeout=90.0)
         logger.info("SyntheticAgent initialized — HTTP orchestration mode")
@@ -271,6 +271,23 @@ class SyntheticAgent:
             except Exception:
                 pass
 
+        # If identity is confirmed but SQL generation failed/timed out, build SQL directly
+        if not is_conversational and master_identity and not sql_query:
+            usn = master_identity["usn"]
+            sql_query = (
+                f"SELECT s.student_usn, s.student_name, s.admission_year, "
+                f"rs.semester_no, r.sgpa, r.percentage "
+                f"FROM aiml_academic.students s "
+                f"LEFT JOIN aiml_academic.student_semester_results r "
+                f"ON s.student_usn = r.student_usn "
+                f"LEFT JOIN aiml_academic.result_sessions rs "
+                f"ON r.session_id = rs.session_id "
+                f"WHERE s.student_usn = '{usn}' "
+                f"ORDER BY rs.semester_no"
+            )
+            reasoning_parts.append("SQL grounded directly (identity fallback)")
+            pipeline_steps.append({"agent": "SQL Generator", "status": "done", "detail": "identity-grounded (no LLM)"})
+
         # 4b. Retriever — enrich context with semantically retrieved chunks
         retriever_context = ""
         if not is_conversational:
@@ -448,8 +465,25 @@ RESPONSE STYLE:
             )
             final_resp = completion.choices[0].message.content.strip()
         except Exception as e:
-            final_resp = f"Failed to generate response: {e}"
             logger.error("LLM synthesis failed: %s", e)
+            # Fallback: format data directly without LLM when synthesis times out
+            if master_identity and not rows:
+                final_resp = f"**{master_identity['name']}** — USN: `{master_identity['usn']}`"
+            elif master_identity and rows:
+                sgpas = [float(r['sgpa']) for r in rows if r.get('sgpa') is not None]
+                cgpa = round(sum(sgpas) / len(sgpas), 2) if sgpas else None
+                sem_lines = "\n".join(
+                    f"| {r.get('semester_no')} | {r.get('sgpa')} | {r.get('percentage')}% |"
+                    for r in rows if r.get('semester_no')
+                )
+                cgpa_line = f"\n**CGPA: {cgpa}**" if cgpa else ""
+                final_resp = (
+                    f"**{master_identity['name']}** (USN: `{master_identity['usn']}`){cgpa_line}\n\n"
+                    f"| Semester | SGPA | Percentage |\n|---|---|---|\n{sem_lines}"
+                    if sem_lines else f"**{master_identity['name']}** — USN: `{master_identity['usn']}`"
+                )
+            else:
+                final_resp = "I found some data but couldn't generate a summary. Please try again."
 
         # Anti-hallucination guard: if no DB rows returned, block invented data for ALL query types
         if not is_conversational and not rows:

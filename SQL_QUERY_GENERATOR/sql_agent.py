@@ -44,7 +44,7 @@ def _call_llm_for_sql(prompt_text: str) -> str:
     api_key = os.getenv("NVIDIA_API_KEY") or os.getenv("OPENAI_API_KEY")
     is_nv = api_key.startswith("nvapi-") if api_key else False
     
-    kwargs = {"api_key": api_key, "timeout": 10.0}
+    kwargs = {"api_key": api_key, "timeout": 60.0}
     if is_nv:
         kwargs["base_url"] = "https://integrate.api.nvidia.com/v1"
         model = "meta/llama-3.1-8b-instruct"

@@ -19,10 +19,10 @@ spec:
             host: frontend
             port:
               number: 80
-      timeout: 60s
+      timeout: 600s
       retries:
         attempts: 2
-        perTryTimeout: 30s
+        perTryTimeout: 300s
         retryOn: gateway-error,connect-failure,retriable-4xx
 
 ---
@@ -41,10 +41,10 @@ spec:
             host: orchestrator
             port:
               number: 8000
-      timeout: 120s
+      timeout: 600s
       retries:
-        attempts: 3
-        perTryTimeout: 40s
+        attempts: 2
+        perTryTimeout: 300s
         retryOn: 5xx,reset,connect-failure
 
 ---
@@ -125,10 +125,10 @@ spec:
             host: sql-generator
             port:
               number: 8004
-      timeout: 60s
+      timeout: 180s
       retries:
         attempts: 2
-        perTryTimeout: 30s
+        perTryTimeout: 90s
         retryOn: 5xx,reset,connect-failure
 
 ---
